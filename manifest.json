@@ -1,20 +1,39 @@
 {
-  "manifest_version": 3,
-  "name": "Marketplace Mapper",
-  "version": "1.0",
-  "description": "Shows a map with Facebook Marketplace listings.",
-  "permissions": ["activeTab", "scripting", "geolocation"],
-  "content_scripts": [
-    {
-      "matches": ["*://www.facebook.com/marketplace/*"],
-      "js": ["content.js"],
-      "css": ["styles.css"]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["map.html"],
-      "matches": ["*://www.facebook.com/*"]
-    }
-  ]
+    "manifest_version": 3,
+    "name": "Marketplace Mapper",
+    "version": "1.0",
+    "description": "Floating map of Facebook Marketplace listings.",
+    "permissions": [
+        "scripting",
+        "activeTab"
+    ],
+    "host_permissions": [
+        "*://*.facebook.com/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "*://*.facebook.com/marketplace*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "map.html",
+                "map.js",
+                "leaflet/leaflet.css",
+                "leaflet/leaflet.js",
+                "leaflet/images/*",
+                "pako.min.js",
+                "data/packed.json.gz"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ]
 }

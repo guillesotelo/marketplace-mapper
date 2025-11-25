@@ -1,42 +1,152 @@
-let map = L.map('map').setView([57.7, 11.97], 11); // Gothenburg default
+let map;
+let markerLayer;
+let cityIndex = null;
+let initialLocation = null;
+let listings = null;
+let addedLinks = [];
 
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 18
-}).addTo(map);
+// Load city DB
+async function loadCityDB() {
+    const url = chrome.runtime.getURL("data/packed.json.gz");
+    const res = await fetch(url);
+    const buf = await res.arrayBuffer();
+    const jsonText = new TextDecoder().decode(pako.ungzip(new Uint8Array(buf)));
+    const arr = JSON.parse(jsonText);
 
-let markers = [];
+    cityIndex = new Map();
+    for (const [name, lat, lon] of arr) {
+        cityIndex.set(name.toLowerCase(), { name, lat, lon });
+    }
+    console.log("City DB loaded:", cityIndex.size);
+}
 
+// Normalize text for matching
+function normalize(text) {
+    if (!text) return '';
+    // lowercase, trim, remove trailing letter codes like ", M"
+    return text.toLowerCase().trim().replace(/,[ ]?[A-Z]$/, '').normalize('NFD').replace(/\p{Diacritic}/gu, '');
+}
 
-async function geocode(address) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
-  const res = await fetch(url);
-  const json = await res.json();
-  if (!json[0]) return null;
-  return { lat: json[0].lat, lon: json[0].lon };
+// Offline geocode
+function geocodeOffline(text) {
+    if (!cityIndex) return null;
+    if (!text) return null;
+
+    // Normalize
+    const norm = text.trim();
+    const parts = norm.split(",").map(s => s.trim());
+
+    const cityPart = parts[0].toLowerCase();
+    const provincePart = parts[1]?.toUpperCase() || null;
+
+    // Look for exact match: city + province
+    for (const [k, v] of cityIndex) {
+        if (v.name.toLowerCase() === cityPart) {
+            if (!provincePart || v.admin1 === provincePart) {
+                return v;
+            }
+        }
+    }
+
+    // fallback: city only
+    for (const [k, v] of cityIndex) {
+        if (v.name.toLowerCase() === cityPart) return v;
+    }
+
+    return null;
+}
+
+function jitter(lat, lon, meters = 100) {
+    // Convert meters to degrees (~1 deg latitude ≈ 111 km)
+    const latOffset = (Math.random() - 0.5) * (meters / 111000);
+    const lonOffset = (Math.random() - 0.5) * (meters / (111000 * Math.cos(lat * Math.PI / 180)));
+    return [lat + latOffset, lon + lonOffset];
+}
+
+function getMergedListings(newListings) {
+    currentListings = listings || []
+    const merged = []
+    const mergedLinks = currentListings.map(l => `${l.url}`)
+
+    currentListings.concat(newListings).forEach(l => {
+        if (!mergedLinks.includes(l.url)) {
+            const place = geocodeOffline(l.location || l.title.split("\n").pop());
+            const [jLat, jLon] = place ? jitter(place.lat, place.lon, 2000) : [null, null]
+
+            const newListing = l.jLat ? l : { ...l, jLat, jLon }
+
+            merged.push(newListing)
+        }
+    })
+
+    listings = merged
+    return merged
 }
 
 
-window.addEventListener("message", async (event) => {
-  if (event.data.type !== "LISTINGS") return;
+// Update map with listings
+function updateMap(newListings) {
+    if (!map || !cityIndex) return;
+    // markerLayer.clearLayers();
 
-  const listings = event.data.listings;
+    getMergedListings(newListings).forEach(item => {
+        const place = geocodeOffline(item.location || item.title.split("\n").pop());
+        if (!place || addedLinks.includes(item.url) || !item.jLat || !item.jLon) return;
 
-  // Clear old markers
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
+        addedLinks.push(item.url)
 
-  for (const item of listings) {
-    const coords = await geocode(item.location);
-    if (!coords) continue;
+        const marker = L.marker([item.jLat, item.jLon]).addTo(markerLayer);
 
-    const marker = L.marker([coords.lat, coords.lon]).addTo(map);
-    markers.push(marker);
+        // Include image in popup if available
+        let popupHtml = `<b>${item.title}</b><br>${item.location}<br><a href="${item.url}" target="_blank">Open</a>`;
+        if (item.image) {
+            popupHtml = `<img src="${item.image}" style="width:100px;height:auto;"><br>` + popupHtml;
+        }
+        marker.bindPopup(popupHtml);
 
-    marker.bindPopup(`
-      <b>${item.title}</b><br>
-      <a href="${item.url}" target="_blank">Open listing</a>
-    `);
-  }
+    });
+}
+
+// Initialize Leaflet map
+async function initMap() {
+    await loadCityDB();
+
+    map = L.map("map").setView([57.7089, 11.9746], 11);
+    markerLayer = L.layerGroup().addTo(map);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        subdomains: ["a", "b", "c"],
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    console.log("Map ready");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    const mapDiv = document.getElementById("map");
+    mapDiv.style.width = "100%";
+    mapDiv.style.height = "100%";
+    initMap();
+
+    setTimeout(() => {
+        map.invalidateSize();
+    }, 200);
 });
 
+// Listen for listings from content.js
+window.addEventListener("message", (event) => {
+    if (event.data.source === "marketplace-mapper") {
+        updateMap(event.data.listings);
+    }
 
+    if (event.data?.source === 'marketplace-mapper-content') {
+        if (event.data.type === 'INITIAL_CITY') {
+            const place = geocodeOffline(event.data.city);
+            if (place && !initialLocation) {
+                initialLocation = place
+                map.setView([place.lat, place.lon], 12);
+            }
+        }
+    }
+});
