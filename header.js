@@ -1,4 +1,5 @@
 const dragButton = document.getElementById('mkp-mapper-drag-handle');
+const closeButton = document.getElementById('mkp-mapper-close-map');
 
 dragButton.addEventListener("mousedown", (e) => {
     e.preventDefault();
@@ -32,3 +33,9 @@ dragButton.addEventListener("mousedown", (e) => {
     document.addEventListener("mousemove", mouseMove);
     document.addEventListener("mouseup", mouseUp);
 });
+
+closeButton.addEventListener('click', () => {
+    parent.postMessage({
+        type: "close-map",
+    }, "*"); 
+})

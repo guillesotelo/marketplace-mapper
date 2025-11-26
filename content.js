@@ -18,17 +18,20 @@
     });
 
     // Listen for drag messages from the header
+    let dragOverlay = null;
+    let offsetX = 0;
+    let offsetY = 0;
+    let onMouseMove = null;
+    let onMouseUp = null;
+
     window.addEventListener("message", (event) => {
       if (!iframe || event.source !== iframe.contentWindow) return;
-
-      let dragOverlay = null;
-      let offsetX, offsetY;
 
       if (event.data.type === "drag-start") {
         offsetX = event.data.offsetX;
         offsetY = event.data.offsetY;
 
-        // overlay to capture events
+        // Create overlay to capture events
         dragOverlay = document.createElement("div");
         Object.assign(dragOverlay.style, {
           position: "fixed",
@@ -44,22 +47,37 @@
 
         iframe.style.zIndex = 10000000;
 
-        const onMouseMove = (eMove) => {
+        onMouseMove = (eMove) => {
           iframe.style.left = eMove.clientX - offsetX + "px";
           iframe.style.top = eMove.clientY - offsetY + "px";
         };
 
-        const onMouseUp = () => {
+        onMouseUp = () => {
           document.removeEventListener("mousemove", onMouseMove);
           document.removeEventListener("mouseup", onMouseUp);
-          dragOverlay.remove();
+          if (dragOverlay) {
+            dragOverlay.remove();
+            dragOverlay = null;
+          }
         };
 
         dragOverlay.addEventListener("mousemove", onMouseMove);
         dragOverlay.addEventListener("mouseup", onMouseUp);
       }
-    });
 
+      else if (event.data.type === "drag-end") {
+        // Explicit drag-end message from iframe
+        if (dragOverlay && onMouseMove && onMouseUp) {
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+          dragOverlay.remove();
+          dragOverlay = null;
+        }
+      }
+      else if (event.data.type === "close-map") {
+        iframe.remove()
+      }
+    });
 
     document.body.appendChild(iframe);
   }
