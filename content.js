@@ -1,9 +1,9 @@
 (function () {
   // Inject iframe only once
-  if (!document.getElementById("market-map-frame")) {
+  if (!document.getElementById("mkp-mapper-frame")) {
     const iframe = document.createElement("iframe");
     iframe.src = chrome.runtime.getURL("map.html");
-    iframe.id = "market-map-frame";
+    iframe.id = "mkp-mapper-frame";
 
     Object.assign(iframe.style, {
       position: "fixed",
@@ -16,6 +16,50 @@
       background: "#fff",
       borderRadius: "8px"
     });
+
+    // Listen for drag messages from the header
+    window.addEventListener("message", (event) => {
+      if (!iframe || event.source !== iframe.contentWindow) return;
+
+      let dragOverlay = null;
+      let offsetX, offsetY;
+
+      if (event.data.type === "drag-start") {
+        offsetX = event.data.offsetX;
+        offsetY = event.data.offsetY;
+
+        // overlay to capture events
+        dragOverlay = document.createElement("div");
+        Object.assign(dragOverlay.style, {
+          position: "fixed",
+          top: "0",
+          left: "0",
+          width: "100vw",
+          height: "100vh",
+          zIndex: 9999999,
+          background: "transparent",
+          cursor: "grabbing"
+        });
+        document.body.appendChild(dragOverlay);
+
+        iframe.style.zIndex = 10000000;
+
+        const onMouseMove = (eMove) => {
+          iframe.style.left = eMove.clientX - offsetX + "px";
+          iframe.style.top = eMove.clientY - offsetY + "px";
+        };
+
+        const onMouseUp = () => {
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+          dragOverlay.remove();
+        };
+
+        dragOverlay.addEventListener("mousemove", onMouseMove);
+        dragOverlay.addEventListener("mouseup", onMouseUp);
+      }
+    });
+
 
     document.body.appendChild(iframe);
   }
@@ -57,47 +101,16 @@
     });
   }
 
-  function getCurrentSelectedLocation() {
-    // Find the button that contains the location
-    const buttonDivs = Array.from(document.querySelectorAll('div[role="button"]'));
-
-    for (const div of buttonDivs) {
-      const span = div.querySelector('span');
-      if (!span) continue;
-
-      // Only take text nodes directly under the span
-      const city = Array.from(span.childNodes)
-        .filter(node => node.nodeType === Node.TEXT_NODE)
-        .map(n => n.textContent.trim())
-        .join("");
-
-      // Quick sanity check: skip if empty or looks like distance
-      if (city && !/\d+\s?km/i.test(city)) return city;
-    }
-
-    return null;
-  }
-
   // Send listings to iframe every 2s
   setInterval(() => {
     const listings = getListings();
-    const iframe = document.getElementById("market-map-frame");
+    const iframe = document.getElementById("mkp-mapper-frame");
     if (iframe && iframe.contentWindow) {
       // console.log('sending listsings', listings)
       iframe.contentWindow.postMessage({
         source: "marketplace-mapper",
         listings
       }, "*");
-    }
-
-    // Send a message from content.js when page loads
-    const cityName = getCurrentSelectedLocation();
-    if (cityName) {
-      window.postMessage({
-        source: 'marketplace-mapper-content',
-        type: 'INITIAL_CITY',
-        city: cityName
-      }, '*');
     }
   }, 2000);
 })();

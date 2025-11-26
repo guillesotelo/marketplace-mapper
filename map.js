@@ -17,7 +17,7 @@ async function loadCityDB() {
     for (const [name, lat, lon] of arr) {
         cityIndex.set(name.toLowerCase(), { name, lat, lon });
     }
-    console.log("City DB loaded:", cityIndex.size);
+    // console.log("City DB loaded:", cityIndex.size);
 }
 
 // Normalize text for matching
@@ -89,7 +89,7 @@ function updateMap(newListings) {
     if (!map || !cityIndex) return;
     // markerLayer.clearLayers();
 
-    getMergedListings(newListings).forEach(item => {
+    getMergedListings(newListings).forEach((item, index) => {
         const place = geocodeOffline(item.location || item.title.split("\n").pop());
         if (!place || addedLinks.includes(item.url) || !item.jLat || !item.jLon) return;
 
@@ -104,6 +104,11 @@ function updateMap(newListings) {
         }
         marker.bindPopup(popupHtml);
 
+        if (index === 0 && !initialLocation) {
+            initialLocation = place
+            map.setView([place.lat, place.lon], 12);
+        }
+
     });
 }
 
@@ -111,7 +116,7 @@ function updateMap(newListings) {
 async function initMap() {
     await loadCityDB();
 
-    map = L.map("map").setView([57.7089, 11.9746], 11);
+    map = L.map("mkp-mapper-map").setView([57.7089, 11.9746], 11);
     markerLayer = L.layerGroup().addTo(map);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -120,11 +125,11 @@ async function initMap() {
         attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
 
-    console.log("Map ready");
+    // console.log("Map ready");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    const mapDiv = document.getElementById("map");
+    const mapDiv = document.getElementById("mkp-mapper-map");
     mapDiv.style.width = "100%";
     mapDiv.style.height = "100%";
     initMap();
@@ -138,15 +143,5 @@ document.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("message", (event) => {
     if (event.data.source === "marketplace-mapper") {
         updateMap(event.data.listings);
-    }
-
-    if (event.data?.source === 'marketplace-mapper-content') {
-        if (event.data.type === 'INITIAL_CITY') {
-            const place = geocodeOffline(event.data.city);
-            if (place && !initialLocation) {
-                initialLocation = place
-                map.setView([place.lat, place.lon], 12);
-            }
-        }
     }
 });

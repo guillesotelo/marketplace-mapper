@@ -25,6 +25,7 @@
             "resources": [
                 "map.html",
                 "map.js",
+                "header.js",
                 "leaflet/leaflet.css",
                 "leaflet/leaflet.js",
                 "leaflet/images/*",

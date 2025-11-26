@@ -6,21 +6,54 @@
     <link rel="stylesheet" href="leaflet/leaflet.css">
     <style>
         html,
-        body,
-        #map {
+        body {
             height: 100%;
             margin: 0;
             padding: 0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #mkp-mapper-header {
+            height: 60px;
+            background: #eee;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        #mkp-mapper-drag-handle {
+            background: #333;
+            color: #fff;
+            padding: 6px;
+            font-size: 14px;
+            cursor: grab;
+        }
+
+        #mkp-mapper-map {
+            flex: 1;
         }
     </style>
 </head>
 
 <body>
-    <div id="map"></div>
+    <div id="mkp-mapper-header">
+        <button id="mkp-mapper-drag-handle">☰</button>
+        <h1>MKP Mapper</h1>
+        <button id="mkp-mapper-close-map">X</button>
+    </div>
+    <div id="mkp-mapper-map"></div>
 
     <script src="leaflet/leaflet.js"></script>
     <script src="pako.min.js"></script>
     <script src="map.js"></script>
+    <script src="header.js"></script>
 </body>
 
 </html>
