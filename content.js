@@ -1,4 +1,22 @@
-(function () {
+let lastUrl = location.href;
+
+const observer = new MutationObserver(() => {
+  if (location.href !== lastUrl) {
+    lastUrl = location.href;
+    onRouteChange();
+  }
+});
+
+observer.observe(document, { subtree: true, childList: true });
+
+function onRouteChange() {
+  if (location.pathname.startsWith("/marketplace")) {
+    injectMap();
+  }
+}
+
+function injectMap() {
+
   // Inject iframe only once
   if (!document.getElementById("mkp-mapper-frame")) {
     const iframe = document.createElement("iframe");
@@ -131,4 +149,9 @@
       }, "*");
     }
   }, 2000);
-})();
+}
+
+// Run at first load
+if (location.pathname.startsWith("/marketplace")) {
+  injectMap();
+}
