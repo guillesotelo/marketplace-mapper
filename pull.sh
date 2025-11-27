@@ -4,4 +4,4 @@
 git fetch
 
 # Pull
-git pull origin main
+git pull origin master

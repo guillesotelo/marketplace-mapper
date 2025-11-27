@@ -13,4 +13,4 @@ git add .
 git commit -m "$1"
 
 # Push changes to the master branch on origin
-git push origin main
+git push origin master
