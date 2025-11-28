@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Mapper",
-    "version": "1.0",
+    "version": "1.2",
     "description": "Floating map of Facebook Marketplace listings.",
     "permissions": [
         "scripting",
@@ -13,7 +13,7 @@
     "content_scripts": [
         {
             "matches": [
-                "*://*.facebook.com/marketplace*"
+                "*://*.facebook.com/*"
             ],
             "js": [
                 "content.js"
@@ -30,7 +30,7 @@
                 "leaflet/leaflet.js",
                 "leaflet/images/*",
                 "pako.min.js",
-                "data/packed.json.gz"
+                "data/cities_db.json.gz"
             ],
             "matches": [
                 "<all_urls>"

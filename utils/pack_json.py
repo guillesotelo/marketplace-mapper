@@ -2,7 +2,7 @@ import json
 import sys
 
 if len(sys.argv) != 3:
-    print("Usage: python3 pack_json.py merged.json packed.json")
+    print("Usage: python3 pack_json.py merged.json cities_db.json")
     sys.exit(1)
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:

@@ -100,6 +100,20 @@ function injectMap() {
     document.body.appendChild(iframe);
   }
 
+  function isMileage(text) {
+    if (!text) return false;
+
+    const t = text.toLowerCase().replace(/\s+/g, " ").trim();
+
+    // Matches:
+    //  "130 miles", "220,000 km", "145k miles", "87.000 km", "108 mil millas"
+    return (
+      /\b\d[\d.,]*\s?(km|kms|kilometers|kilometros|miles|mi|millas)\b/.test(t) ||
+      /\b\d[\d.,]*k\b/.test(t) ||
+      /\b\d+\s?(mil)\s?(millas|km)\b/.test(t)
+    );
+  }
+
   // Scrape Marketplace listings
   function getListings() {
     const items = [...document.querySelectorAll("a[href*='/marketplace/item/']")];
@@ -109,18 +123,22 @@ function injectMap() {
       const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
 
       let price = "";
-      let location = "";
       let title = "";
+      let location = "";
 
       if (lines.length === 1) {
         title = lines[0];
-      } else if (lines.length === 2) {
+      } else if (lines.length >= 2) {
         price = lines[0];
         title = lines[1];
-      } else {
-        price = lines[0];
-        title = lines[1];
-        location = lines[lines.length - 1];
+
+        // Look for the first line AFTER title that is NOT mileage
+        for (let i = 2; i < lines.length; i++) {
+          if (!isMileage(lines[i])) {
+            location = lines[i];
+            break;
+          }
+        }
       }
 
       // Extract image if available
@@ -137,6 +155,7 @@ function injectMap() {
     });
   }
 
+
   // Send listings to iframe every 2s
   setInterval(() => {
     const listings = getListings();
@@ -145,7 +164,8 @@ function injectMap() {
       // console.log('sending listsings', listings)
       iframe.contentWindow.postMessage({
         source: "marketplace-mapper",
-        listings
+        listings,
+        url: location.href,
       }, "*");
     }
   }, 2000);

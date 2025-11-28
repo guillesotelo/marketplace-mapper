@@ -1,147 +1,252 @@
 let map;
-let markerLayer;
+let markerLayerGroup = null;
+let markers = [];
 let cityIndex = null;
-let initialLocation = null;
-let listings = null;
-let addedLinks = [];
 
-// Load city DB
+let addedLinks = new Set();         // URLs of markers already added
+let globalListings = [];            // merged listings
+let lastSearchSignature = null;     // for new-search detection
+let initialLocation = null;
+let jitterCache = new Map();   // url -> { jLat, jLon }
+
+
+// -----------------------------
+// Detect new search
+// -----------------------------
+function isNewSearch(data) {
+    const signature = data.url;
+    if (!signature.includes('/item/') && signature !== lastSearchSignature) {
+        lastSearchSignature = signature;
+        return true;
+    }
+    return false;
+}
+
+
+// -----------------------------
+// Load City DB
+// -----------------------------
 async function loadCityDB() {
-    const url = chrome.runtime.getURL("data/packed.json.gz");
+    const url = chrome.runtime.getURL("data/cities_db.json.gz");
     const res = await fetch(url);
     const buf = await res.arrayBuffer();
-    const jsonText = new TextDecoder().decode(pako.ungzip(new Uint8Array(buf)));
-    const arr = JSON.parse(jsonText);
+    const arr = JSON.parse(new TextDecoder().decode(
+        pako.ungzip(new Uint8Array(buf))
+    ));
 
     cityIndex = new Map();
-    for (const [name, lat, lon] of arr) {
-        cityIndex.set(name.toLowerCase(), { name, lat, lon });
-    }
-    // console.log("City DB loaded:", cityIndex.size);
-}
 
-// Normalize text for matching
-function normalize(text) {
-    if (!text) return '';
-    // lowercase, trim, remove trailing letter codes like ", M"
-    return text.toLowerCase().trim().replace(/,[ ]?[A-Z]$/, '').normalize('NFD').replace(/\p{Diacritic}/gu, '');
-}
+    for (const city of arr) {
+        const allNames = [city.name, ...(city.aliases || [])];
 
-// Offline geocode
-function geocodeOffline(text) {
-    if (!cityIndex) return null;
-    if (!text) return null;
-
-    // Normalize
-    const norm = text.trim();
-    const parts = norm.split(",").map(s => s.trim());
-
-    const cityPart = parts[0].toLowerCase();
-    const provincePart = parts[1]?.toUpperCase() || null;
-
-    // Look for exact match: city + province
-    for (const [k, v] of cityIndex) {
-        if (v.name.toLowerCase() === cityPart) {
-            if (!provincePart || v.admin1 === provincePart) {
-                return v;
-            }
+        for (const name of allNames) {
+            const norm = normalize(name);
+            if (!cityIndex.has(norm)) cityIndex.set(norm, []);
+            cityIndex.get(norm).push(city);
         }
     }
 
-    // fallback: city only
-    for (const [k, v] of cityIndex) {
-        if (v.name.toLowerCase() === cityPart) return v;
-    }
-
-    return null;
+    // console.log("City DB loaded:", arr.length, "cities,", cityIndex.size, "unique keys");
 }
 
-function jitter(lat, lon, meters = 100) {
-    // Convert meters to degrees (~1 deg latitude ≈ 111 km)
+
+// -----------------------------
+// Normalize
+// -----------------------------
+function normalize(text) {
+    if (!text) return "";
+    return text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/[–—]/g, "-")
+        .replace(/\b(near|nära|près de|cerca de|vicino a|en|in|on)\b/g, "")
+        .replace(/\b(county|province|region|state|kommun|län)\b/g, "")
+        .replace(/[^a-z0-9 ,.-]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+
+// -----------------------------
+// Offline geocode
+// -----------------------------
+function geocodeOffline(text, preferredCountry = null) {
+    if (!cityIndex || !text) return null;
+
+    const parts = text.split(",").map(x => x.trim());
+    const cityPart = normalize(parts[0]);
+    const adminPart = parts[1] ? normalize(parts[1]) : null;
+
+    const candidates = cityIndex.get(cityPart) || [];
+
+    // 1. match country bias
+    if (preferredCountry) {
+        const cn = normalize(preferredCountry);
+        const match = candidates.find(c => normalize(c.country) === cn);
+        if (match) return match;
+    }
+
+    // 2. admin1 match
+    if (adminPart) {
+        const match = candidates.find(c =>
+            normalize(c.admin1_name) === adminPart ||
+            normalize(c.country) === adminPart
+        );
+        if (match) return match;
+    }
+
+    // 3. fallback first
+    return candidates[0] || null;
+}
+
+
+// -----------------------------
+// Jitter coords
+// -----------------------------
+function jitter(lat, lon, meters = 1500) {
     const latOffset = (Math.random() - 0.5) * (meters / 111000);
     const lonOffset = (Math.random() - 0.5) * (meters / (111000 * Math.cos(lat * Math.PI / 180)));
     return [lat + latOffset, lon + lonOffset];
 }
 
-function getMergedListings(newListings) {
-    currentListings = listings || []
-    const merged = []
-    const mergedLinks = currentListings.map(l => `${l.url}`)
 
-    currentListings.concat(newListings).forEach(l => {
-        if (!mergedLinks.includes(l.url)) {
-            const place = geocodeOffline(l.location || l.title.split("\n").pop());
-            const [jLat, jLon] = place ? jitter(place.lat, place.lon, 2000) : [null, null]
-
-            const newListing = l.jLat ? l : { ...l, jLat, jLon }
-
-            merged.push(newListing)
-        }
-    })
-
-    listings = merged
-    return merged
-}
-
-
-// Update map with listings
-function updateMap(newListings) {
-    if (!map || !cityIndex) return;
-    // markerLayer.clearLayers();
-
-    getMergedListings(newListings).forEach((item, index) => {
-        const place = geocodeOffline(item.location || item.title.split("\n").pop());
-        if (!place || addedLinks.includes(item.url) || !item.jLat || !item.jLon) return;
-
-        addedLinks.push(item.url)
-
-        const marker = L.marker([item.jLat, item.jLon]).addTo(markerLayer);
-
-        // Include image in popup if available
-        let popupHtml = `<b>${item.title}</b><br>${item.location}<br><a href="${item.url}" target="_blank">Open</a>`;
-        if (item.image) {
-            popupHtml = `<img src="${item.image}" style="width:100px;height:auto;"><br>` + popupHtml;
-        }
-        marker.bindPopup(popupHtml);
-
-        if (index === 0 && !initialLocation) {
-            initialLocation = place
-            map.setView([place.lat, place.lon], 12);
-        }
-
-    });
-}
-
-// Initialize Leaflet map
+// -----------------------------
+// Create map + layer
+// -----------------------------
 async function initMap() {
     await loadCityDB();
 
-    map = L.map("mkp-mapper-map").setView([57.7089, 11.9746], 11);
-    markerLayer = L.layerGroup().addTo(map);
+    map = L.map("mkp-mapper-map");
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        subdomains: ["a", "b", "c"],
         maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
 
-    // console.log("Map ready");
+    markerLayerGroup = L.layerGroup().addTo(map);
 }
 
+
+// -----------------------------
+// Clear markers
+// -----------------------------
+function clearMapMarkers() {
+    if (markerLayerGroup) markerLayerGroup.clearLayers();
+    markers = [];
+}
+
+
+// -----------------------------
+// Add one marker
+// -----------------------------
+function addMarkerToMap(listing) {
+    if (!listing.jLat || !listing.jLon) return;
+    let popupHtml = `
+        <b>${listing.title}</b>
+        <br>${listing.location}<br>
+        <a href="${listing.url}" target="_blank">Open</a>
+        `;
+    if (listing.image) {
+        popupHtml = `<img src="${listing.image}" style="width:100px;height:auto;"><br>` + popupHtml;
+    }
+
+    const marker = L.marker([listing.jLat, listing.jLon])
+        .addTo(markerLayerGroup)
+        .bindPopup(popupHtml);
+
+    markers.push(marker);
+}
+
+
+// -----------------------------
+// Merge and geocode listings (ONCE)
+// -----------------------------
+function mergeListings(newListings) {
+    for (const l of newListings) {
+
+        // Skip duplicates based on URL
+        if (addedLinks.has(l.url)) {
+            // But restore cached jitter on repeated listings
+            if (jitterCache.has(l.url)) {
+                const { jLat, jLon } = jitterCache.get(l.url);
+                l.jLat = jLat;
+                l.jLon = jLon;
+            }
+            continue;
+        }
+
+        addedLinks.add(l.url);
+
+        // Geocode once
+        const place = geocodeOffline(l.location || "");
+
+        if (place) {
+            let jLat, jLon;
+
+            // If jitter was used before → reuse same jitter
+            if (jitterCache.has(l.url)) {
+                ({ jLat, jLon } = jitterCache.get(l.url));
+            } else {
+                // First time → randomize + store
+                [jLat, jLon] = jitter(place.lat, place.lon, 2000);
+                jitterCache.set(l.url, { jLat, jLon });
+            }
+
+            l.jLat = jLat;
+            l.jLon = jLon;
+        }
+
+        globalListings.push(l);
+    }
+}
+
+
+
+// -----------------------------
+// DOM Ready
+// -----------------------------
 document.addEventListener("DOMContentLoaded", () => {
     const mapDiv = document.getElementById("mkp-mapper-map");
     mapDiv.style.width = "100%";
     mapDiv.style.height = "100%";
-    initMap();
 
-    setTimeout(() => {
-        map.invalidateSize();
-    }, 200);
+    initMap().then(() => {
+        setTimeout(() => map.invalidateSize(), 200);
+    });
 });
 
-// Listen for listings from content.js
+
+// -----------------------------
+// Receive listings
+// -----------------------------
 window.addEventListener("message", (event) => {
-    if (event.data.source === "marketplace-mapper") {
-        updateMap(event.data.listings);
+    if (event.data.source !== "marketplace-mapper") return;
+
+    const newSearch = isNewSearch(event.data);
+
+    if (newSearch) {
+        addedLinks.clear();
+        globalListings = [];
+        jitterCache.clear();
+        clearMapMarkers();
+        initialLocation = null;
+    }
+
+    mergeListings(event.data.listings);
+
+    // render only new ones
+    for (const l of globalListings) {
+        if (l._rendered) continue;
+        addMarkerToMap(l);
+        l._rendered = true;
+
+        // first marker sets initial view
+        if (!initialLocation && l.jLat) {
+            initialLocation = true;
+            map.setView([l.jLat, l.jLon], 11);
+
+            const overlay = document.getElementById("map-loading");
+            if (overlay) overlay.remove();
+        }
     }
 });

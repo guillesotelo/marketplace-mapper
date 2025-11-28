@@ -62,7 +62,6 @@
             margin: .3rem;
             font-size: .7rem;
         }
-
     </style>
 </head>
 
@@ -77,9 +76,26 @@
         <h1 id="mkp-mapper-title">MKP Mapper</h1>
         <button id="mkp-mapper-close-map">X</button>
     </div>
-    <div id="mkp-mapper-map"></div>
+    <div id="mkp-mapper-map">
+        <div id="map-loading" style="
+        position:absolute;
+        top:50%;
+        left:50%;
+        transform:translate(-50%, -50%);
+        background:rgba(255,255,255,0.9);
+        padding:10px 20px;
+        border-radius:6px;
+        z-index:1000;
+        font-weight:bold;
+        font-size:16px;
+        text-align:center;
+        ">
+            Loading location...
+        </div>
+    </div>
     <div id="mkp-mapper-footer">
-        <p>Listing locations are aproximate. Contact <a href="https://guillermo-sotelo.vercel.app/" target="_blank">the creator</a> for more info.</p>
+        <p>Listing locations are aproximate. Contact <a href="https://guillermo-sotelo.vercel.app/" target="_blank">the
+                creator</a> for more info.</p>
     </div>
 
     <script src="leaflet/leaflet.js"></script>
