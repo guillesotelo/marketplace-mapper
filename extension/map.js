@@ -160,12 +160,13 @@ function clearMapMarkers() {
 function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
     let popupHtml = `
-        <b>${listing.title}</b>
-        <br>${listing.location}<br>
+        <p style="margin: 0;"><strong>${listing.title}</strong></p>
+        <p style="margin: 0;">${listing.price}<p>
+        <p style="margin: 0; font-size: .9rem; color: #858585;">${listing.location}</p>
         <a href="${listing.url}" target="_blank">Open</a>
         `;
     if (listing.image) {
-        popupHtml = `<img src="${listing.image}" style="width:100px;height:auto;"><br>` + popupHtml;
+        popupHtml = `<img src="${listing.image}" style="width: 100%; height: auto; border-radius: .5rem;"><br>` + popupHtml;
     }
 
     const marker = L.marker([listing.jLat, listing.jLon])

@@ -492,10 +492,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	font-size: 13px;
 	font-size: 1.08333em;
 	min-height: 1px;
+	width: 150px !important;
 	}
 .leaflet-popup-content p {
-	margin: 17px 0;
-	margin: 1.3em 0;
+	margin: 0;
 	}
 .leaflet-popup-tip-container {
 	width: 40px;

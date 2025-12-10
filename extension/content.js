@@ -1,4 +1,5 @@
 let lastUrl = location.href;
+let mapClosed = false
 
 const observer = new MutationObserver(() => {
   if (location.href !== lastUrl) {
@@ -10,7 +11,7 @@ const observer = new MutationObserver(() => {
 observer.observe(document, { subtree: true, childList: true });
 
 function onRouteChange() {
-  if (location.pathname.startsWith("/marketplace")) {
+  if (location.pathname.startsWith("/marketplace") && !mapClosed) {
     injectMap();
   }
 }
@@ -93,6 +94,7 @@ function injectMap() {
         }
       }
       else if (event.data.type === "close-map") {
+        mapClosed = true
         iframe.remove()
       }
     });
