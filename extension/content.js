@@ -1,11 +1,37 @@
 let lastUrl = location.href;
-let mapClosed = false
+let mapClosed = false;
+let lastCity = null;
+let scheduled = false;
+
+
+function getMarketplaceCity() {
+  const el = document.querySelector('#seo_filters span[dir="auto"]');
+  if (!el) return null;
+  return (el.innerText || el.textContent)?.match(/^[^·]+/)?.[0].trim() ?? null;
+}
+
 
 const observer = new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    onRouteChange();
-  }
+  if (scheduled) return;
+  scheduled = true;
+
+  requestAnimationFrame(() => {
+    scheduled = false;
+
+    // Route change detection
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      onRouteChange();
+    }
+
+    // City detection (currently not used)
+    if (location.pathname.startsWith('/marketplace')) {
+      const city = getMarketplaceCity();
+      if (city && city !== lastCity) {
+        lastCity = city;
+      }
+    }
+  });
 });
 
 observer.observe(document, { subtree: true, childList: true });
@@ -31,8 +57,8 @@ function injectMap() {
       width: "420px",
       height: "520px",
       zIndex: 999999,
-      border: "1px solid #ccc",
-      background: "#fff",
+      border: "1px solid #354c80",
+      background: "#354c80",
       borderRadius: "8px"
     });
 
@@ -178,20 +204,6 @@ function injectMap() {
           context.admin1 = loc.reverse_geocode.state || null; // or "province"
         }
       }
-
-      // 2. Fallback: DOM query
-      if (!context.lat) {
-        const el = document.querySelector('[data-testid="marketplace-location-picker"]');
-        if (el) {
-          const text = el.innerText || "";
-          // crude parsing: "Monte Grande, Buenos Aires"
-          const parts = text.split(",").map(x => x.trim());
-          if (parts.length >= 2) {
-            context.admin1 = parts[1];
-            context.country = "AR"; // assuming Argentina if user location is Buenos Aires
-          }
-        }
-      }
     } catch (e) { console.warn("Marketplace location detection failed", e); }
 
     return context;
@@ -208,7 +220,8 @@ function injectMap() {
         source: "marketplace-mapper",
         listings,
         url: location.href,
-        context: getMarketplaceLocation()
+        context: getMarketplaceLocation(),
+        city: lastCity // currently not used
       }, "*");
     }
   }, 2000);

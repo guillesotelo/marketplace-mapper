@@ -6,9 +6,13 @@ let cityIndex = null;
 let addedLinks = new Set();         // URLs of markers already added
 let globalListings = [];            // merged listings
 let lastSearchSignature = null;     // for new-search detection
-let initialLocation = null;
+let initialLocationSet = null;
 let jitterCache = new Map();   // url -> { jLat, jLon }
 
+let searchContext = null;
+let contextSamples = [];
+let lastIncomingContext = null;
+const CONTEXT_SAMPLE_LIMIT = 7;
 
 // -----------------------------
 // Detect new search
@@ -83,25 +87,29 @@ function geocodeOffline(text, context = null) {
     const cityPart = normalize(parts[0]);
     const adminPart = parts[1] ? normalize(parts[1]) : null;
 
-    const candidates = cityIndex.get(cityPart) || [];
-
+    let candidates = cityIndex.get(cityPart) || [];
     if (!candidates.length) return null;
 
-    // Score candidates
+    // --- context filter: if adminPart is ambiguous, bias by context ---
+    if (context && (!adminPart || adminPart.length <= 3)) {
+        const filtered = candidates.filter(c =>
+            (!context.country || normalize(c.country) === normalize(context.country)) &&
+            (!context.admin1 || normalize(c.admin1_name) === normalize(context.admin1))
+        );
+        if (filtered.length) candidates = filtered;
+    }
+
+    // --- scoring ---
     let best = null;
     let bestScore = -Infinity;
 
     for (const c of candidates) {
         let score = 0;
 
-        // 1. Exact country match (or context bias)
         if (context?.country && normalize(c.country) === normalize(context.country)) score += 100;
-
-        // 2. Admin1 match (or context)
         if (adminPart && normalize(c.admin1_name) === adminPart) score += 50;
         if (context?.admin1 && normalize(c.admin1_name) === normalize(context.admin1)) score += 50;
 
-        // 3. Fallback: closer to context coordinates
         if (context?.lat && context?.lon) {
             const dLat = c.lat - context.lat;
             const dLon = c.lon - context.lon;
@@ -119,10 +127,12 @@ function geocodeOffline(text, context = null) {
 }
 
 
+
+
 // -----------------------------
 // Jitter coords
 // -----------------------------
-function jitter(lat, lon, meters = 1500) {
+function jitter(lat, lon, meters = 2000) {
     const latOffset = (Math.random() - 0.5) * (meters / 111000);
     const lonOffset = (Math.random() - 0.5) * (meters / (111000 * Math.cos(lat * Math.PI / 180)));
     return [lat + latOffset, lon + lonOffset];
@@ -155,13 +165,43 @@ function clearMapMarkers() {
 
 
 // -----------------------------
+// Parse price to show previous price properly
+// -----------------------------
+function parsePrice(price) {
+    if (!price) return '-';
+
+    const tokens = price.match(
+        /(?:[^\d\s]{1,3}\s*)?\d[\d.,\s]*\d(?:\s*[^\d\s]{1,3})?/g
+    );
+
+    if (!tokens || tokens.length === 0) return price;
+
+    // Single price → return as-is
+    if (tokens.length === 1) {
+        return `<span>${tokens[0].trim()}</span>`;
+    }
+
+    // Two prices → new + old
+    const [newPrice, oldPrice] = tokens;
+
+    return `
+        <span>${newPrice.trim()}</span>
+        <span style="text-decoration: line-through; color: #888; margin-left: .25rem;">
+            ${oldPrice.trim()}
+        </span>
+    `;
+}
+
+
+
+// -----------------------------
 // Add one marker
 // -----------------------------
 function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
     let popupHtml = `
         <p style="margin: 0;"><strong>${listing.title}</strong></p>
-        <p style="margin: 0;">${listing.price}<p>
+        <p style="margin: 0;">${parsePrice(listing.price)}<p>
         <p style="margin: 0; font-size: .9rem; color: #858585;">${listing.location}</p>
         <a href="${listing.url}" target="_blank">Open</a>
         `;
@@ -178,14 +218,74 @@ function addMarkerToMap(listing) {
 
 
 // -----------------------------
+// Helper for collecting candidate cities per listing
+// -----------------------------
+function collectContextSample(locationText) {
+    if (!locationText) return;
+
+    const cityKey = normalize(locationText.split(",")[0]);
+    const candidates = cityIndex.get(cityKey);
+    if (!candidates) return;
+
+    contextSamples.push(...candidates);
+}
+
+
+// -----------------------------
+// Infer the most likely context for init location
+// -----------------------------
+function inferContext(candidates) {
+    const countryCount = new Map();
+    const adminCount = new Map();
+
+    for (const c of candidates) {
+        countryCount.set(c.country, (countryCount.get(c.country) || 0) + 1);
+        if (c.admin1_name) {
+            const key = `${c.country}|${c.admin1_name}`;
+            adminCount.set(key, (adminCount.get(key) || 0) + 1);
+        }
+    }
+
+    const bestCountry = [...countryCount.entries()]
+        .sort((a, b) => b[1] - a[1])[0]?.[0];
+
+    const bestAdmin = [...adminCount.entries()]
+        .filter(([k]) => k.startsWith(bestCountry + "|"))
+        .sort((a, b) => b[1] - a[1])[0];
+
+    const filtered = candidates.filter(c =>
+        c.country === bestCountry &&
+        (!bestAdmin || `${c.country}|${c.admin1_name}` === bestAdmin[0])
+    );
+
+    // centroid
+    const lat = filtered.reduce((s, c) => s + c.lat, 0) / filtered.length;
+    const lon = filtered.reduce((s, c) => s + c.lon, 0) / filtered.length;
+
+    return {
+        country: bestCountry,
+        admin1: bestAdmin ? bestAdmin[0].split("|")[1] : null,
+        lat,
+        lon
+    };
+}
+
+
+// -----------------------------
+// Return context received just if it has data in it
+// -----------------------------
+function isStrongContext(ctx) {
+    return !!(ctx && ctx.lat && ctx.lon);
+}
+
+
+// -----------------------------
 // Merge and geocode listings (ONCE)
 // -----------------------------
-function mergeListings(newListings, context) {
+function mergeListings(newListings, incomingContext) {
     for (const l of newListings) {
-
-        // Skip duplicates based on URL
+        // Skip duplicates
         if (addedLinks.has(l.url)) {
-            // But restore cached jitter on repeated listings
             if (jitterCache.has(l.url)) {
                 const { jLat, jLon } = jitterCache.get(l.url);
                 l.jLat = jLat;
@@ -193,31 +293,43 @@ function mergeListings(newListings, context) {
             }
             continue;
         }
-
         addedLinks.add(l.url);
 
-        // Geocode once
-        const place = geocodeOffline(l.location || "", context);
-
-        if (place) {
-            let jLat, jLon;
-
-            // If jitter was used before → reuse same jitter
-            if (jitterCache.has(l.url)) {
-                ({ jLat, jLon } = jitterCache.get(l.url));
-            } else {
-                // First time → randomize + store
-                [jLat, jLon] = jitter(place.lat, place.lon, 2000);
-                jitterCache.set(l.url, { jLat, jLon });
+        // Collect context samples
+        if (!searchContext && !isStrongContext(incomingContext)) {
+            collectContextSample(l.location);
+            if (contextSamples.length >= CONTEXT_SAMPLE_LIMIT) {
+                searchContext = inferContext(contextSamples);
+                contextSamples.length = 0;
             }
-
-            l.jLat = jLat;
-            l.jLon = jLon;
         }
+
+        const contextToUse = isStrongContext(incomingContext) ? incomingContext : searchContext;
+        const place = geocodeOffline(l.location || "", contextToUse);
+
+        if (!place) continue; // skip if geocoding failed
+
+        // Country lock: skip listings outside inferred country
+        if (contextToUse?.country && place.country !== contextToUse.country) {
+            console.log("Skipping listing outside country:", l.location, place.country);
+            continue;
+        }
+
+        // jitter coords
+        let jLat, jLon;
+        if (jitterCache.has(l.url)) {
+            ({ jLat, jLon } = jitterCache.get(l.url));
+        } else {
+            [jLat, jLon] = jitter(place.lat, place.lon, 2000);
+            jitterCache.set(l.url, { jLat, jLon });
+        }
+        l.jLat = jLat;
+        l.jLon = jLon;
 
         globalListings.push(l);
     }
 }
+
 
 
 
@@ -244,13 +356,16 @@ window.addEventListener("message", (event) => {
     const newSearch = isNewSearch(event.data);
 
     if (newSearch) {
+        searchContext = null;
+        contextSamples = [];
         addedLinks.clear();
         globalListings = [];
         jitterCache.clear();
         clearMapMarkers();
-        initialLocation = null;
+        initialLocationSet = null;
     }
 
+    lastIncomingContext = event.data.context;
     mergeListings(event.data.listings, event.data.context);
 
     // render only new ones
@@ -260,9 +375,14 @@ window.addEventListener("message", (event) => {
         l._rendered = true;
 
         // first marker sets initial view
-        if (!initialLocation && l.jLat) {
-            initialLocation = true;
-            map.setView([l.jLat, l.jLon], 11);
+        if (!initialLocationSet && (searchContext || isStrongContext(lastIncomingContext))) {
+            initialLocationSet = true;
+
+            const ctx = isStrongContext(lastIncomingContext) ? lastIncomingContext : searchContext;
+
+            if (ctx?.lat && ctx?.lon) {
+                map.setView([ctx.lat, ctx.lon], 11);
+            }
 
             const overlay = document.getElementById("map-loading");
             if (overlay) overlay.remove();
