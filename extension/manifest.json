@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Mapper",
-    "version": "1.4",
+    "version": "1.4.1",
     "description": "Floating map of Facebook Marketplace listings.",
-    "permissions": [
+   "permissions": [
         "scripting",
         "activeTab"
     ],
@@ -36,5 +36,21 @@
                 "<all_urls>"
             ]
         }
-    ]
+    ],
+    "icons": {
+        "16": "assets/icons/mkpm16.png",
+        "32": "assets/icons/mkpm32.png",
+        "48": "assets/icons/mkpm48.png",
+        "64": "assets/icons/mkpm64.png",
+        "128": "assets/icons/mkpm128.png"
+    },
+    "action": {
+        "default_icon": {
+            "16": "assets/icons/mkpm16.png",
+            "32": "assets/icons/mkpm32.png",
+            "48": "assets/icons/mkpm48.png",
+            "64": "assets/icons/mkpm64.png",
+            "128": "assets/icons/mkpm128.png"
+        }
+    }
 }
