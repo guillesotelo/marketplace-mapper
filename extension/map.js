@@ -1,6 +1,7 @@
 let map;
 let markerLayerGroup = null;
 let markers = [];
+let markerByItemKey = new Map(); // itemKey -> marker
 let cityIndex = null;
 
 let addedLinks = new Set();         // URLs of markers already added
@@ -25,6 +26,50 @@ function isNewSearch(data) {
     }
     return false;
 }
+
+
+// -----------------------------
+// Get item ID url
+// -----------------------------
+function extractMarketplaceItemKey(url) {
+    if (!url) return null;
+
+    try {
+        const u = new URL(url);
+
+        // Normalize hostname (www / m.)
+        const host = u.hostname.replace(/^www\.|^m\./, "");
+
+        // Match /marketplace/item/<id>
+        const match = u.pathname.match(/\/marketplace\/item\/(\d+)/);
+
+        if (!match) return null;
+
+        return `${host}/marketplace/item/${match[1]}/`;
+    } catch {
+        return null;
+    }
+}
+
+
+// -----------------------------
+// Open listing popup by URL - ID matching
+// -----------------------------
+function openListingOnMapByUrl(currentUrl) {
+    const key = extractMarketplaceItemKey(currentUrl);
+    if (!key) return;
+
+    const marker = markerByItemKey.get(key);
+    if (!marker) return;
+
+    map.setView(marker.getLatLng(), Math.max(map.getZoom(), 14), {
+        animate: true
+    });
+
+    marker.openPopup();
+}
+
+
 
 
 // -----------------------------
@@ -201,19 +246,27 @@ function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
     let popupHtml = `
         <p style="margin: 0;"><strong>${listing.title}</strong></p>
-        <p style="margin: 0;">${parsePrice(listing.price)}<p>
-        <p style="margin: 0; font-size: .9rem; color: #858585;">${listing.location}</p>
-        <a href="${listing.url}" target="_blank">Open</a>
+        <p style="margin: 0; font-size: .9rem;">${parsePrice(listing.price)}<p>
+        <p style="margin: 0 0 .3rem 0; font-size: .8rem; color: #858585;">${listing.location}</p>
+        <a href="${listing.url}" target="_blank">Open Listing</a>
         `;
     if (listing.image) {
         popupHtml = `<img src="${listing.image}" style="width: 100%; height: auto; border-radius: .5rem;"><br>` + popupHtml;
     }
 
+    let tooltipHtml = `
+        <img src="${listing.image}" style="width: 100px; height: auto; border-radius: .5rem;">
+    `
+
     const marker = L.marker([listing.jLat, listing.jLon])
         .addTo(markerLayerGroup)
-        .bindPopup(popupHtml);
+        .bindPopup(popupHtml)
+        .bindTooltip(tooltipHtml);
 
     markers.push(marker);
+
+    const itemKey = extractMarketplaceItemKey(listing.url);
+    if (itemKey) markerByItemKey.set(itemKey, marker);
 }
 
 
@@ -388,4 +441,7 @@ window.addEventListener("message", (event) => {
             if (overlay) overlay.remove();
         }
     }
+
+    // Open lising popup if navigating item URL
+    openListingOnMapByUrl(event.data.url);
 });

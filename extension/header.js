@@ -1,10 +1,19 @@
 const dragButton = document.getElementById('mkp-mapper-drag-handle');
+const title = document.getElementById('mkp-mapper-title');
 const closeButton = document.getElementById('mkp-mapper-close-map');
 
 dragButton.addEventListener("mousedown", (e) => {
+    onDrag(dragButton, e)
+});
+
+title.addEventListener("mousedown", (e) => {
+    onDrag(title, e)
+});
+
+const onDrag = (el, e) => {
     e.preventDefault();
 
-    const rect = dragButton.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     const offsetX = e.clientX - rect.left; // mouse inside button
     const offsetY = e.clientY - rect.top;
 
@@ -32,10 +41,10 @@ dragButton.addEventListener("mousedown", (e) => {
 
     document.addEventListener("mousemove", mouseMove);
     document.addEventListener("mouseup", mouseUp);
-});
+}
 
 closeButton.addEventListener('click', () => {
     parent.postMessage({
         type: "close-map",
-    }, "*"); 
+    }, "*");
 })

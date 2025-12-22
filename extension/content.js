@@ -90,7 +90,7 @@ function injectMap() {
         });
         document.body.appendChild(dragOverlay);
 
-        iframe.style.zIndex = 10000000;
+        iframe.style.zIndex = 9999998;
 
         onMouseMove = (eMove) => {
           iframe.style.left = eMove.clientX - offsetX + "px";
