@@ -32,6 +32,7 @@
         #mkp-mapper-title {
             font-size: 1.5rem;
             cursor: grab;
+            text-align: center;
         }
 
         #mkp-mapper-drag-handle:active {
@@ -46,13 +47,21 @@
             font-size: 14px;
             cursor: grab;
             border-radius: .5rem;
+            margin-right: 1.4rem;
         }
 
         #mkp-mapper-drag-handle:active {
             cursor: grabbing;
         }
 
-        #mkp-mapper-close-map {
+        #mpk-mapper-controls {
+            display: flex;
+            flex-direction: row;
+            justify-content: end;
+        }
+
+        #mkp-mapper-close-map,
+        #mkp-mapper-minimize-map {
             color: #efefef;
             background: #354c80;
             border: none;
@@ -63,7 +72,8 @@
             border-radius: .5rem !important;
         }
 
-        #mkp-mapper-close-map:hover {
+        #mkp-mapper-close-map:hover,
+        #mkp-mapper-minimize-map:hover {
             background: #293b64 !important;
         }
 
@@ -96,7 +106,10 @@
                 fill="#fff" />
         </svg>
         <h1 id="mkp-mapper-title">MKP Mapper</h1>
-        <button id="mkp-mapper-close-map">X</button>
+        <div id="mpk-mapper-controls">
+            <button id="mkp-mapper-minimize-map">–</button>
+            <button id="mkp-mapper-close-map">X</button>
+        </div>
     </div>
     <div id="mkp-mapper-map">
         <div id="map-loading" style="

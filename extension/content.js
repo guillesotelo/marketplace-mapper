@@ -2,6 +2,7 @@ let lastUrl = location.href;
 let mapClosed = false;
 let lastCity = null;
 let scheduled = false;
+const iframeHeight = '520px'
 
 
 function getMarketplaceCity() {
@@ -55,7 +56,7 @@ function injectMap() {
       top: "80px",
       right: "20px",
       width: "420px",
-      height: "520px",
+      height: iframeHeight,
       zIndex: 999999,
       border: "1px solid #354c80",
       background: "#354c80",
@@ -122,6 +123,9 @@ function injectMap() {
       else if (event.data.type === "close-map") {
         mapClosed = true
         iframe.remove()
+      }
+      else if (event.data.type === "minimize-map") {
+        iframe.style.height = event.data.height || iframeHeight
       }
     });
 
