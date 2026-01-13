@@ -4,7 +4,6 @@ let lastCity = null;
 let scheduled = false;
 const iframeHeight = '520px'
 
-
 function getMarketplaceCity() {
   const el = document.querySelector('#seo_filters span[dir="auto"]');
   if (!el) return null;
@@ -94,8 +93,16 @@ function injectMap() {
         iframe.style.zIndex = 9999998;
 
         onMouseMove = (eMove) => {
-          iframe.style.left = eMove.clientX - offsetX + "px";
-          iframe.style.top = eMove.clientY - offsetY + "px";
+          const top = eMove.clientY - offsetY + "px";
+          const left = eMove.clientX - offsetX + "px";
+          iframe.style.top = top
+          iframe.style.left = left
+
+          iframe.contentWindow.postMessage({
+            type: "save-position",
+            top,
+            left
+          }, "*");
         };
 
         onMouseUp = () => {
@@ -120,12 +127,20 @@ function injectMap() {
           dragOverlay = null;
         }
       }
+
+      else if (event.data.type === "load-position") {
+        iframe.style.top = event.data.top
+        iframe.style.left = event.data.left
+      }
+
       else if (event.data.type === "close-map") {
         mapClosed = true
         iframe.remove()
       }
+
       else if (event.data.type === "minimize-map") {
-        iframe.style.height = event.data.height || iframeHeight
+        const newHeight = event.data.height || iframeHeight
+        iframe.style.height = newHeight
       }
     });
 

@@ -364,7 +364,7 @@ function mergeListings(newListings, incomingContext) {
 
         // Country lock: skip listings outside inferred country
         if (contextToUse?.country && place.country !== contextToUse.country) {
-            console.log("Skipping listing outside country:", l.location, place.country);
+            // console.log("Skipping listing outside country:", l.location, place.country);
             continue;
         }
 

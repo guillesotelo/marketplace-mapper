@@ -3,6 +3,25 @@ const title = document.getElementById('mkp-mapper-title');
 const closeButton = document.getElementById('mkp-mapper-close-map');
 const minimizeButton = document.getElementById('mkp-mapper-minimize-map');
 
+setTimeout(() => {
+    const savedIframeHeight = localStorage.getItem('mkpm-iframeHeight')
+    const savedPosition = JSON.parse(localStorage.getItem('mkpm-position'), 'null')
+
+    if (savedIframeHeight && savedIframeHeight !== 'null') {
+        const minimizedState = Number(savedIframeHeight.replace('px', '')) < 200
+        handleMinimizeMap(minimizedState)
+    }
+
+    if (savedPosition && savedPosition.top && savedPosition.left) {
+        const { top, left } = savedPosition
+        parent.postMessage({
+            type: "load-position",
+            top,
+            left
+        }, "*");
+    }
+}, 1000)
+
 dragButton.addEventListener("mousedown", (e) => {
     onDrag(dragButton, e)
 });
@@ -51,10 +70,14 @@ closeButton.addEventListener('click', () => {
 })
 
 minimizeButton.addEventListener('click', () => {
+    handleMinimizeMap()
+})
+
+function handleMinimizeMap(minimizedState) {
     const footer = document.getElementById('mkp-mapper-footer')
     const header = document.getElementById('mkp-mapper-header');
     const map = document.getElementById('mkp-mapper-map')
-    const minimized = minimizeButton.textContent === '+'
+    const minimized = minimizedState === false || minimizeButton.textContent === '+'
     minimizeButton.textContent = minimized ? '–' : '+'
     const headerHeight = header?.offsetHeight ? `${header?.offsetHeight}px` : null
 
@@ -68,6 +91,8 @@ minimizeButton.addEventListener('click', () => {
             type: "minimize-map",
             height: null
         }, "*");
+
+        localStorage.setItem('mkpm-iframeHeight', '')
     } else {
         // handle minimize
         if (map && footer) {
@@ -78,6 +103,12 @@ minimizeButton.addEventListener('click', () => {
             type: "minimize-map",
             height: headerHeight
         }, "*");
+        localStorage.setItem('mkpm-iframeHeight', headerHeight)
     }
+}
 
+window.addEventListener("message", (event) => {
+    if (event.data.type === "save-position") {
+        localStorage.setItem('mkpm-position', JSON.stringify(event.data))
+    }
 })

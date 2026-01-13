@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Mapper",
-    "version": "1.4.2",
-    "description": "Floating map of Facebook Marketplace listings.",
+    "version": "1.4.4",
+    "description": "Interactive map view for Facebook Marketplace listings.",
    "permissions": [
         "scripting",
         "activeTab"
