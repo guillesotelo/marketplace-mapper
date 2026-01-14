@@ -238,24 +238,46 @@ function parsePrice(price) {
 }
 
 
-
 // -----------------------------
 // Add one marker
 // -----------------------------
 function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
     let popupHtml = `
-        <p style="margin: 0;"><strong>${listing.title}</strong></p>
-        <p style="margin: 0; font-size: .9rem;">${parsePrice(listing.price)}<p>
-        <p style="margin: 0 0 .3rem 0; font-size: .8rem; color: #858585;">${listing.location}</p>
-        <a href="${listing.url}" target="_blank">Open Listing</a>
-        `;
+        <div style="display: flex; flex-direction: column; margin: 0 .5rem .5rem;">
+            <p style="margin: 0; font-size: .9rem; font-weight: bold;">${parsePrice(listing.price)}<p>
+            <p style="margin: 0;">${listing.title}</p>
+            <p style="margin: 0 0 .3rem 0; font-size: .8rem; color: #858585;">${listing.location}</p>
+            <a href="${listing.url}" target="_blank">Open Listing</a>
+            </div>
+            `;
     if (listing.image) {
-        popupHtml = `<img src="${listing.image}" style="width: 100%; height: auto; border-radius: .5rem;"><br>` + popupHtml;
+        popupHtml = `
+            <div style="posiion: relative;">
+                ${listing.badge ?
+                `<p 
+                        style="margin: 0; 
+                        font-size: .75rem; 
+                        font-style: italic; 
+                        position: absolute; 
+                        top: 0; 
+                        left: 0; 
+                        padding: .2rem .4rem; 
+                        background: #fff; 
+                        border-top-left-radius: .5rem;
+                        border-bottom-right-radius: .5rem;"
+                        >${listing.badge}<p>`
+                : ''}
+                <a href="${listing.url}" target="_blank">
+                    <img src="${listing.image}" style="width: 100%; height: auto;">
+                </a>
+                <br>
+            </div>` + popupHtml;
     }
 
     let tooltipHtml = `
         <img src="${listing.image}" style="width: 100px; height: auto; border-radius: .5rem;">
+        <p style="font-size: .75rem; font-weight: bold; margin: .6rem .2rem; padding: 0;">${parsePrice(listing.price)}</p>
     `
 
     const marker = L.marker([listing.jLat, listing.jLon])

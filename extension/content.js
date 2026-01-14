@@ -147,18 +147,35 @@ function injectMap() {
     document.body.appendChild(iframe);
   }
 
-  function isMileage(text) {
-    if (!text) return false;
+  function isPrice(text) {
+    return /\d/.test(text) &&
+      /(\p{Sc}|\b[A-Z]{2,3}\b|kr|€|£|usd|eur|sek|nok|dkk)/iu.test(text);
+  }
 
-    const t = text.toLowerCase().replace(/\s+/g, " ").trim();
+  // Loosen function just for badge detection
+  function looksLikePrice(text) {
+    return /\d/.test(text);
+  }
 
-    // Matches:
-    //  "130 miles", "220,000 km", "145k miles", "87.000 km", "108 mil millas"
-    return (
-      /\b\d[\d.,]*\s?(km|kms|kilometers|kilometros|miles|mi|millas)\b/.test(t) ||
-      /\b\d[\d.,]*k\b/.test(t) ||
-      /\b\d+\s?(mil)\s?(millas|km)\b/.test(t)
-    );
+  function parseLines(lines) {
+    const priceIndex = lines.findIndex(isPrice);
+    if (priceIndex === -1) return {};
+
+    const price = lines[priceIndex];
+    const location = lines[lines.length - 1] || "";
+    const hasBadge =
+      lines.length >= 2 &&
+      !looksLikePrice(lines[0]) &&
+      looksLikePrice(lines[1]);
+
+    let title = "";
+    if (priceIndex + 1 < lines.length - 1) {
+      title = lines[priceIndex + 1];
+    }
+
+    const badge = hasBadge ? lines[0] : "";
+
+    return { price, title, location, badge };
   }
 
   // Scrape Marketplace listings
@@ -166,42 +183,26 @@ function injectMap() {
     const items = [...document.querySelectorAll("a[href*='/marketplace/item/']")];
 
     return items.map(a => {
-      const fullText = a.innerText.trim();
-      const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
+      const lines = a.innerText
+        .split("\n")
+        .map(l => l.trim())
+        .filter(Boolean);
 
-      let price = "";
-      let title = "";
-      let location = "";
-
-      if (lines.length === 1) {
-        title = lines[0];
-      } else if (lines.length >= 2) {
-        price = lines[0];
-        title = lines[1];
-
-        // Look for the first line AFTER title that is NOT mileage
-        for (let i = 2; i < lines.length; i++) {
-          if (!isMileage(lines[i])) {
-            location = lines[i];
-            break;
-          }
-        }
-      }
-
-      // Extract image if available
       const imgNode = a.querySelector("img");
       const image = imgNode ? imgNode.src : null;
+
+      const { price, title, location, badge } = parseLines(lines);
 
       return {
         title,
         location,
         price,
+        badge,
         url: a.href,
         image
       };
     });
   }
-
 
   // -----------------------------
   // Get user current Marketplace location
