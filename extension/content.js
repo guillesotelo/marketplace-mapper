@@ -155,40 +155,130 @@ function injectMap() {
     }, 4000)
   }
 
-  function isPrice(text) {
-    return /\d/.test(text) &&
-      /(\p{Sc}|\b[A-Z]{2,3}\b|kr|€|£|usd|eur|sek|nok|dkk)/iu.test(text);
+  function normalize(text) {
+    return text
+      .toLowerCase()
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  // Loosen function just for badge detection
-  function looksLikePrice(text) {
-    return /\d/.test(text);
+  const FREE_WORDS = [
+    // English / Germanic
+    "free", "gratis", "kostenlos",
+
+    // Romance
+    "gratuit", "gratuito", "gratuita",
+
+    // Slavic
+    "za darmo", "besplatno",
+
+    // Finnish / Hungarian
+    "ilmainen", "ingyenes",
+
+    // Russian
+    "бесплатно",
+
+    // Indian languages
+    "मुफ्त",      // Hindi
+    "ఉచితం",     // Telugu
+    "উপহার"      // Bengali
+  ];
+
+  const BADGE_WORDS = [
+    // English
+    "just listed", "new listing", "newly listed",
+
+    // Scandinavian
+    "ny", "nettopp lagt ut", "nylig lagt ut",
+
+    // German / Dutch
+    "neu", "gerade eingestellt",
+
+    // Romance
+    "nouvelle annonce", "recién publicado",
+
+    // Slavic
+    "nowe ogłoszenie", "nový inzerát",
+
+    // Finnish
+    "juuri lisätty",
+
+    // Russian
+    "только что размещено", "новое объявление"
+  ];
+
+  const CURRENCY_MARKERS = [
+    // Symbols
+    "$", "€", "£", "₹", "₽",
+
+    // Text / ISO
+    "usd", "eur", "gbp",
+    "inr", "rs", "rub",
+
+    // Nordic
+    "kr", "sek", "nok", "dkk"
+  ];
+
+  function isFree(text) {
+    const t = normalize(text);
+    return FREE_WORDS.some(w => t === w || t.startsWith(w + " "));
+  }
+
+  function isBadge(text) {
+    return BADGE_WORDS.includes(normalize(text));
+  }
+
+  function hasCurrencyNearNumber(text) {
+    return /(\p{Sc}\s?\d|\d\s?\p{Sc})/u.test(text);
+  }
+
+  function isPrice(text) {
+    const t = normalize(text);
+
+    if (isFree(t)) return true;
+
+    const hasNumber = /\d/.test(t);
+    const hasCurrency =
+      hasCurrencyNearNumber(t) ||
+      CURRENCY_MARKERS.some(c => t.includes(c));
+
+    return hasNumber && hasCurrency;
   }
 
   function parseLines(lines) {
-    const priceIndex = lines.findIndex(isPrice);
-    if (priceIndex === -1) return {};
-
-    const price = lines[priceIndex];
-    const location = lines[lines.length - 1] || "";
-    const hasBadge =
-      lines.length >= 2 &&
-      !looksLikePrice(lines[0]) &&
-      looksLikePrice(lines[1]);
-
+    let price = null;
+    let badge = "";
     let title = "";
-    if (priceIndex + 1 < lines.length - 1) {
-      title = lines[priceIndex + 1];
+    let location = "";
+
+    let working = [...lines];
+
+    // Badge (strict match only)
+    if (working.length && isBadge(working[0])) {
+      badge = working.shift();
     }
 
-    const badge = hasBadge ? lines[0] : "";
+    // Price (anywhere)
+    const priceIndex = working.findIndex(isPrice);
+    if (priceIndex !== -1) {
+      price = working[priceIndex];
+      working.splice(priceIndex, 1);
+    }
+
+    // Remaining: title + location
+    if (working.length) {
+      location = working[working.length - 1];
+      title = working.slice(0, -1).join(" ");
+    }
 
     return { price, title, location, badge };
   }
 
-  // Scrape Marketplace listings
   function getListings() {
-    const items = [...document.querySelectorAll("a[href*='/marketplace/item/']")];
+    const items = [
+      ...document.querySelectorAll("a[href*='/marketplace/item/']")
+    ];
 
     return items.map(a => {
       const lines = a.innerText
