@@ -59,7 +59,9 @@ function injectMap() {
       zIndex: 999999,
       border: "1px solid #354c80",
       background: "#354c80",
-      borderRadius: "8px"
+      borderRadius: "8px",
+      transition: '.4s',
+      opacity: 0,
     });
 
     // Listen for drag messages from the header
@@ -73,6 +75,7 @@ function injectMap() {
       if (!iframe || event.source !== iframe.contentWindow) return;
 
       if (event.data.type === "drag-start") {
+        iframe.style.transition = 'none'
         offsetX = event.data.offsetX;
         offsetY = event.data.offsetY;
 
@@ -106,6 +109,7 @@ function injectMap() {
         };
 
         onMouseUp = () => {
+          iframe.style.transition = '.4s'
           document.removeEventListener("mousemove", onMouseMove);
           document.removeEventListener("mouseup", onMouseUp);
           if (dragOverlay) {
@@ -125,6 +129,7 @@ function injectMap() {
           document.removeEventListener("mouseup", onMouseUp);
           dragOverlay.remove();
           dragOverlay = null;
+          iframe.style.transition = '.4s'
         }
       }
 
@@ -145,6 +150,9 @@ function injectMap() {
     });
 
     document.body.appendChild(iframe);
+    setTimeout(() => {
+      iframe.style.opacity = 1
+    }, 4000)
   }
 
   function isPrice(text) {
@@ -232,7 +240,30 @@ function injectMap() {
 
   // Send listings to iframe every 2s
   setInterval(() => {
-    const listings = getListings();
+
+    // scrape all listings
+    let listings = getListings();
+
+    // scrape listing if standing on item view
+    if (location.href.includes('/item/')) {
+      const image = Array.from(document.querySelectorAll('img'))[1]?.src
+      const spans = Array.from(document.querySelectorAll('div[aria-hidden=false]'))
+      const price = spans[2] ? spans[2].textContent : null
+      const itemLocation = spans[9] ? spans[9].querySelector('span')?.textContent : null
+      const title = document.querySelector('h1')?.textContent
+
+      if (image && price && itemLocation && title) {
+        listings = listings.concat({
+          title,
+          location: itemLocation,
+          price,
+          badge: '',
+          url: location.href,
+          image
+        })
+      }
+    }
+
     const iframe = document.getElementById("mkp-mapper-frame");
     if (iframe && iframe.contentWindow) {
       // console.log('sending listsings', listings)

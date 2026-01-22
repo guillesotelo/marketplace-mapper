@@ -20,6 +20,8 @@ const CONTEXT_SAMPLE_LIMIT = 7;
 // -----------------------------
 function isNewSearch(data) {
     const signature = data.url;
+    // Ignore newSearch when opening an item
+    // TODO: add the item if not added before to the map (scrape differently)
     if (!signature.includes('/item/') && signature !== lastSearchSignature) {
         lastSearchSignature = signature;
         return true;
@@ -37,20 +39,14 @@ function extractMarketplaceItemKey(url) {
     try {
         const u = new URL(url);
 
-        // Normalize hostname (www / m.)
-        const host = u.hostname.replace(/^www\.|^m\./, "");
-
-        // Match /marketplace/item/<id>
-        const match = u.pathname.match(/\/marketplace\/item\/(\d+)/);
-
+        const match = u.pathname.match(/^\/marketplace\/item\/(\d+)/);
         if (!match) return null;
 
-        return `${host}/marketplace/item/${match[1]}/`;
+        return match[1]; // ← ONLY the ID
     } catch {
         return null;
     }
 }
-
 
 // -----------------------------
 // Open listing popup by URL - ID matching

@@ -20,7 +20,7 @@ setTimeout(() => {
             left
         }, "*");
     }
-}, 1000)
+}, 100)
 
 dragButton.addEventListener("mousedown", (e) => {
     onDrag(dragButton, e)
