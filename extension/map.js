@@ -3,6 +3,7 @@ let markerLayerGroup = null;
 let markers = [];
 let markerByItemKey = new Map(); // itemKey -> marker
 let cityIndex = null;
+let lockedAdmin1 = null; // soft lock for inferring listings within the same admin1 first
 
 let addedLinks = new Set();         // URLs of markers already added
 let globalListings = [];            // merged listings
@@ -66,8 +67,6 @@ function openListingOnMapByUrl(currentUrl) {
 }
 
 
-
-
 // -----------------------------
 // Load City DB
 // -----------------------------
@@ -128,34 +127,62 @@ function geocodeOffline(text, context = null) {
     const cityPart = normalize(parts[0]);
     const adminPart = parts[1] ? normalize(parts[1]) : null;
 
-    let candidates = cityIndex.get(cityPart) || [];
-    if (!candidates.length) return null;
+    const candidates = cityIndex.get(cityPart);
+    if (!candidates || !candidates.length) return null;
 
-    // --- context filter: if adminPart is ambiguous, bias by context ---
-    if (context && (!adminPart || adminPart.length <= 3)) {
-        const filtered = candidates.filter(c =>
-            (!context.country || normalize(c.country) === normalize(context.country)) &&
-            (!context.admin1 || normalize(c.admin1_name) === normalize(context.admin1))
-        );
-        if (filtered.length) candidates = filtered;
-    }
-
-    // --- scoring ---
     let best = null;
     let bestScore = -Infinity;
 
     for (const c of candidates) {
         let score = 0;
 
-        if (context?.country && normalize(c.country) === normalize(context.country)) score += 100;
-        if (adminPart && normalize(c.admin1_name) === adminPart) score += 50;
-        if (context?.admin1 && normalize(c.admin1_name) === normalize(context.admin1)) score += 50;
+        const cAdmin = normalize(c.admin1_name);
+        const ctxAdmin = context?.admin1 ? normalize(context.admin1) : null;
+        const listingAdmin =
+            adminPart && adminPart.length <= 3 ? adminPart : null;
 
+        /* ----------------------------------
+         Explicit listing admin (strongest)
+        ---------------------------------- */
+        if (listingAdmin) {
+            if (cAdmin.startsWith(listingAdmin)) {
+                score += 300;
+            } else {
+                score -= 200;
+            }
+        }
+
+        /* ----------------------------------
+         Search intent (soft lock / context)
+           Only if listing did NOT specify admin
+        ---------------------------------- */
+        if (!listingAdmin) {
+            if (lockedAdmin1) {
+                if (cAdmin === lockedAdmin1) score += 120;
+                else score -= 40;
+            }
+
+            if (ctxAdmin && cAdmin === ctxAdmin) {
+                score += 100;
+            }
+        }
+
+        /* ----------------------------------
+           Country
+        ---------------------------------- */
+        if (context?.country &&
+            normalize(c.country) === normalize(context.country)) {
+            score += 60;
+        }
+
+        /* ----------------------------------
+            Distance (weakest signal)
+        ---------------------------------- */
         if (context?.lat && context?.lon) {
             const dLat = c.lat - context.lat;
             const dLon = c.lon - context.lon;
             const dist = Math.sqrt(dLat * dLat + dLon * dLon);
-            score -= dist * 100; // closer is better
+            score -= dist * 30;
         }
 
         if (score > bestScore) {
@@ -164,8 +191,9 @@ function geocodeOffline(text, context = null) {
         }
     }
 
-    return best || candidates[0];
+    return best;
 }
+
 
 
 
@@ -343,6 +371,40 @@ function inferContext(candidates) {
 
 
 // -----------------------------
+// Convert city from message to context for bias
+// -----------------------------
+function cityHintToContext(cityText) {
+    if (!cityText || !cityIndex) return null;
+
+    // "Roanoke, Virginia"
+    const parts = cityText.split(",").map(p => normalize(p.trim()));
+    if (parts.length < 2) return null;
+
+    const city = parts[0];
+    const admin = parts[1];
+
+    const candidates = cityIndex.get(city);
+    if (!candidates) return null;
+
+    // Prefer matching admin1 name
+    const filtered = candidates.filter(c =>
+        normalize(c.admin1_name) === admin
+    );
+
+    const chosen = filtered[0] || candidates[0];
+    if (!chosen) return null;
+
+    return {
+        country: chosen.country,
+        admin1: chosen.admin1_name,
+        lat: chosen.lat,
+        lon: chosen.lon
+    };
+}
+
+
+
+// -----------------------------
 // Return context received just if it has data in it
 // -----------------------------
 function isStrongContext(ctx) {
@@ -434,6 +496,15 @@ window.addEventListener("message", (event) => {
         jitterCache.clear();
         clearMapMarkers();
         initialLocationSet = null;
+    }
+
+    // Try seeding context from city hint (once per search)
+    if (!searchContext && event.data.city) {
+        const seeded = cityHintToContext(event.data.city);
+        if (seeded) {
+            searchContext = seeded;
+            lockedAdmin1 = normalize(seeded.admin1);
+        }
     }
 
     lastIncomingContext = event.data.context;
