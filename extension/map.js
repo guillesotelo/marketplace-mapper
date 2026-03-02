@@ -5,7 +5,7 @@ let markerByItemKey = new Map(); // itemKey -> marker
 let cityIndex = null;
 let lockedAdmin1 = null; // soft lock for inferring listings within the same admin1 first
 
-let addedLinks = new Set();         // URLs of markers already added
+let addedItems = new Set();         // Image URLs of markers already added
 let globalListings = [];            // merged listings
 let lastSearchSignature = null;     // for new-search detection
 let initialLocationSet = null;
@@ -418,7 +418,7 @@ function isStrongContext(ctx) {
 function mergeListings(newListings, incomingContext) {
     for (const l of newListings) {
         // Skip duplicates
-        if (addedLinks.has(l.url)) {
+        if (addedItems.has(l.image)) {
             if (jitterCache.has(l.url)) {
                 const { jLat, jLon } = jitterCache.get(l.url);
                 l.jLat = jLat;
@@ -426,7 +426,7 @@ function mergeListings(newListings, incomingContext) {
             }
             continue;
         }
-        addedLinks.add(l.url);
+        addedItems.add(l.image);
 
         // Collect context samples
         if (!searchContext && !isStrongContext(incomingContext)) {
@@ -491,7 +491,7 @@ window.addEventListener("message", (event) => {
     if (newSearch) {
         searchContext = null;
         contextSamples = [];
-        addedLinks.clear();
+        addedItems.clear();
         globalListings = [];
         jitterCache.clear();
         clearMapMarkers();

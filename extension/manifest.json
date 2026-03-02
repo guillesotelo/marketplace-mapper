@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
-    "name": "Marketplace Mapper",
-    "version": "1.4.8",
+    "name": "Marketplace Map",
+    "version": "1.4.9",
     "description": "Interactive map view for Facebook Marketplace listings.",
    "permissions": [
         "scripting",
