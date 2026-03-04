@@ -360,7 +360,7 @@ function injectMap() {
       iframe.contentWindow.postMessage({
         source: "marketplace-mapper",
         listings,
-        url: location.href,
+        url: lastUrl,
         context: getMarketplaceLocation(),
         city: lastCity // currently not used
       }, "*");
