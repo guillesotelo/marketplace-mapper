@@ -1,0 +1,56 @@
+{
+    "manifest_version": 3,
+    "name": "Marketplace Map",
+    "version": "1.4.10",
+    "description": "Interactive map view for Facebook Marketplace listings.",
+   "permissions": [
+        "scripting",
+        "activeTab"
+    ],
+    "host_permissions": [
+        "*://*.facebook.com/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "*://*.facebook.com/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "map.html",
+                "map.js",
+                "header.js",
+                "leaflet/leaflet.css",
+                "leaflet/leaflet.js",
+                "leaflet/images/*",
+                "pako.min.js",
+                "data/cities_db.json"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "icons": {
+        "16": "assets/icons/mkpm16.png",
+        "32": "assets/icons/mkpm32.png",
+        "48": "assets/icons/mkpm48.png",
+        "64": "assets/icons/mkpm64.png",
+        "128": "assets/icons/mkpm128.png"
+    },
+    "action": {
+        "default_icon": {
+            "16": "assets/icons/mkpm16.png",
+            "32": "assets/icons/mkpm32.png",
+            "48": "assets/icons/mkpm48.png",
+            "64": "assets/icons/mkpm64.png",
+            "128": "assets/icons/mkpm128.png"
+        }
+    }
+}
