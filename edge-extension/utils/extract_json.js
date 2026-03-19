@@ -2,8 +2,8 @@
 const fs = require('fs');
 const zlib = require('zlib');
 
-const inputFile = '../data/cities_db.json.gz';
-const outputFile = '../data/cities_db_extracted.json';
+const inputFile = '../../extension/data/cities_db.json.gz';
+const outputFile = '../data/cities_db.json';
 
 console.log('Decompressing gzipped JSON...');
 const compressed = fs.readFileSync(inputFile);
