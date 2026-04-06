@@ -1,15 +1,16 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Map",
-    "version": "1.4.11",
+    "version": "1.4.12",
     "description": "Interactive map view for Facebook Marketplace listings.",
-    "permissions": [
+      "permissions": [
         "scripting",
         "activeTab",
         "declarativeNetRequest"
     ],
     "host_permissions": [
-        "*://*.facebook.com/*"
+        "*://*.facebook.com/*",
+        "*://*.tile.openstreetmap.org/*"
     ],
     "declarative_net_request": {
         "rule_resources": [

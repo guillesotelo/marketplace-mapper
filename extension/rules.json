@@ -8,14 +8,16 @@
                 {
                     "header": "Referer",
                     "operation": "set",
-                    "value": "https://www.facebook.com/"
+                    "value": "https://www.openstreetmap.org/"
                 }
             ]
         },
         "condition": {
             "urlFilter": "tile.openstreetmap.org",
             "resourceTypes": [
-                "image"
+                "image",
+                "xmlhttprequest",
+                "other"
             ]
         }
     }
