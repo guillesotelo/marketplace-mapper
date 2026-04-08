@@ -212,15 +212,29 @@ function jitter(lat, lon, meters = 2000) {
 // Create map + layer
 // -----------------------------
 async function initMap() {
-    await loadCityDB();
+    try {
+        await loadCityDB();
+    } catch (e) {
+        console.error("MKP Mapper: failed to load city DB", e);
+    }
 
     map = L.map("mkp-mapper-map");
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
         maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
     }).addTo(map);
 
     markerLayerGroup = L.layerGroup().addTo(map);
+
+    // Default world view — removed as soon as first marker lands
+    map.setView([20, 0], 2);
+
+    // Safety timeout: if no listings geocoded after 8s, reveal the map as-is
+    setTimeout(() => {
+        const overlay = document.getElementById("map-loading");
+        if (overlay) overlay.remove();
+    }, 8000);
 }
 
 
@@ -517,17 +531,17 @@ window.addEventListener("message", (event) => {
         l._rendered = true;
 
         // first marker sets initial view
-        if (!initialLocationSet && (searchContext || isStrongContext(lastIncomingContext))) {
-            initialLocationSet = true;
-
+        if (!initialLocationSet) {
             const ctx = isStrongContext(lastIncomingContext) ? lastIncomingContext : searchContext;
+            const viewLat = ctx?.lat || l.jLat;
+            const viewLon = ctx?.lon || l.jLon;
 
-            if (ctx?.lat && ctx?.lon) {
-                map.setView([ctx.lat, ctx.lon], 11);
+            if (viewLat && viewLon) {
+                initialLocationSet = true;
+                map.setView([viewLat, viewLon], 11);
+                const overlay = document.getElementById("map-loading");
+                if (overlay) overlay.remove();
             }
-
-            const overlay = document.getElementById("map-loading");
-            if (overlay) overlay.remove();
         }
     }
 

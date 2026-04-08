@@ -1,25 +1,15 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Map",
-    "version": "1.4.13",
+    "version": "1.4.14",
     "description": "Interactive map view for Facebook Marketplace listings.",
     "permissions": [
         "scripting",
-        "activeTab",
-        "declarativeNetRequest"
+        "activeTab"
     ],
     "host_permissions": [
         "*://*.facebook.com/*"
     ],
-    "declarative_net_request": {
-        "rule_resources": [
-            {
-                "id": "ruleset_1",
-                "enabled": true,
-                "path": "rules.json"
-            }
-        ]
-    },
     "content_scripts": [
         {
             "matches": [
