@@ -1,10 +1,10 @@
-# Marketplace Mapper (Chrome Extension)
+# Marketplace Map (Chrome Extension)
 
 Floating map of Facebook Marketplace listings.
 
 ## Description
 
-Marketplace Mapper enhances your Facebook Marketplace browsing experience by displaying visible listings on a live, draggable map overlay.
+Marketplace Map enhances your Facebook Marketplace browsing experience by displaying visible listings on a live, draggable map overlay.
 It helps you:
 
 - Understand where listings are located geographically
@@ -39,7 +39,7 @@ No account, no backend, no data collection. All processing happens locally in th
 1. Clone this repository to your local machine:
 
 ```bash
-git clone https://github.com/guillesotelo/marketplace-mapper.git
+git clone https://github.com/guillesotelo/marketplace-map.git
 ```
 
 2. Go to [Google Extensions](chrome://extensions/), enable _Developer Mode_ and upload the package by clicking **Load unpacked**.
