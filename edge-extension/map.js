@@ -71,12 +71,12 @@ function openListingOnMapByUrl(currentUrl) {
 // Load City DB
 // -----------------------------
 async function loadCityDB() {
-    const url = chrome.runtime.getURL("data/cities_db.json.gz");
+    const url = chrome.runtime.getURL("data/cities_db.json");
     const res = await fetch(url);
     const buf = await res.arrayBuffer();
 
     let arr = JSON.parse(new TextDecoder().decode(
-        pako.ungzip(new Uint8Array(buf))
+        new Uint8Array(buf)
     ));
 
     // If arr is an object (dictionary), convert to array of city objects
