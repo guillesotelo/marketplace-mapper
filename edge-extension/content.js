@@ -328,6 +328,7 @@ function injectMap() {
   }
 
 
+  itemScraped = false
   // Send listings to iframe every 2s
   setInterval(() => {
 
@@ -343,6 +344,7 @@ function injectMap() {
       const title = document.querySelector('h1')?.textContent
 
       if (image && price && itemLocation && title) {
+        itemScraped = true
         listings = listings.concat({
           title,
           location: itemLocation,
@@ -362,7 +364,8 @@ function injectMap() {
         listings,
         url: lastUrl,
         context: getMarketplaceLocation(),
-        city: lastCity // currently not used
+        city: lastCity, // currently not used
+        itemScraped
       }, "*");
     }
   }, 2000);

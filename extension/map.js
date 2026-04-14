@@ -30,6 +30,18 @@ function isNewSearch(data) {
     return false;
 }
 
+// -----------------------------
+// Detect item view & item already scraped (skip refresh)
+// -----------------------------
+function isItemView(data) {
+    const signature = data.url;
+    const itemScraped = data.itemScraped;
+    if (!signature.includes('/item/') && itemScraped) {
+        return true;
+    }
+    return false;
+}
+
 
 // -----------------------------
 // Get item ID url
@@ -71,12 +83,12 @@ function openListingOnMapByUrl(currentUrl) {
 // Load City DB
 // -----------------------------
 async function loadCityDB() {
-    const url = chrome.runtime.getURL("data/cities_db.json.gz");
+    const url = chrome.runtime.getURL("data/cities_db.json");
     const res = await fetch(url);
     const buf = await res.arrayBuffer();
 
     let arr = JSON.parse(new TextDecoder().decode(
-        pako.ungzip(new Uint8Array(buf))
+        new Uint8Array(buf)
     ));
 
     // If arr is an object (dictionary), convert to array of city objects
@@ -498,7 +510,9 @@ document.addEventListener("DOMContentLoaded", () => {
 // Receive listings
 // -----------------------------
 window.addEventListener("message", (event) => {
-    if (event.data.source !== "marketplace-mapper") return;
+    const itemView = isItemView(event.data);
+
+    if (event.data.source !== "marketplace-mapper" || itemView) return;
 
     const newSearch = isNewSearch(event.data);
 

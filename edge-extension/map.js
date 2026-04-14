@@ -30,6 +30,18 @@ function isNewSearch(data) {
     return false;
 }
 
+// -----------------------------
+// Detect item view & item already scraped (skip refresh)
+// -----------------------------
+function isItemView(data) {
+    const signature = data.url;
+    const itemScraped = data.itemScraped;
+    if (!signature.includes('/item/') && itemScraped) {
+        return true;
+    }
+    return false;
+}
+
 
 // -----------------------------
 // Get item ID url
@@ -498,7 +510,9 @@ document.addEventListener("DOMContentLoaded", () => {
 // Receive listings
 // -----------------------------
 window.addEventListener("message", (event) => {
-    if (event.data.source !== "marketplace-mapper") return;
+    const itemView = isItemView(event.data);
+
+    if (event.data.source !== "marketplace-mapper" || itemView) return;
 
     const newSearch = isNewSearch(event.data);
 
