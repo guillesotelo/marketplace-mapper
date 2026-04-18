@@ -36,7 +36,7 @@ function isNewSearch(data) {
 function isItemView(data) {
     const signature = data.url;
     const itemScraped = data.itemScraped;
-    if (!signature.includes('/item/') && itemScraped) {
+    if (signature.includes('/item/') && itemScraped) {
         return true;
     }
     return false;
