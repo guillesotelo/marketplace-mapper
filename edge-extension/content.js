@@ -275,6 +275,26 @@ function injectMap() {
     return { price, title, location, badge };
   }
 
+  function getLocationFromAriaLabel(ariaLabel) {
+    const withoutId = ariaLabel.replace(/,\s*listing\s+\d+$/, '');
+    if (!withoutId) return '';
+    const parts = withoutId.split(/,\s*/);
+    const priceIdx = parts.findIndex(isPrice);
+    if (priceIdx !== -1 && priceIdx < parts.length - 1) {
+      return parts.slice(priceIdx + 1).join(', ');
+    }
+    return parts[parts.length - 1] || '';
+  }
+
+  function getTitleFromAriaLabel(ariaLabel) {
+    const withoutId = ariaLabel.replace(/,\s*listing\s+\d+$/, '');
+    if (!withoutId) return '';
+    const parts = withoutId.split(/,\s*/);
+    const priceIdx = parts.findIndex(isPrice);
+    if (priceIdx > 0) return parts.slice(0, priceIdx).join(', ');
+    return '';
+  }
+
   function getListings() {
     const items = [
       ...document.querySelectorAll("a[href*='/marketplace/item/']")
@@ -289,7 +309,11 @@ function injectMap() {
       const imgNode = a.querySelector("img");
       const image = imgNode ? imgNode.src : null;
 
-      const { price, title, location, badge } = parseLines(lines);
+      const ariaLabel = a.getAttribute('aria-label') || '';
+      const { price, title: parsedTitle, location: parsedLocation, badge } = parseLines(lines);
+
+      const location = getLocationFromAriaLabel(ariaLabel) || parsedLocation;
+      const title = parsedTitle || getTitleFromAriaLabel(ariaLabel);
 
       return {
         title,
@@ -309,17 +333,28 @@ function injectMap() {
     let context = { lat: null, lon: null, country: null, admin1: null };
 
     try {
-      // 1. Try __PRELOADED_STATE__ (SPA)
       const state = window.__PRELOADED_STATE__ || {};
-      const loc = state.marketplace?.user_current_location || state.marketplace?.saved_searches_location;
-      if (loc && loc.latitude && loc.longitude) {
-        context.lat = loc.latitude;
-        context.lon = loc.longitude;
 
-        // Try reverse geocode for country/admin1
-        if (loc.reverse_geocode) {
-          context.country = loc.reverse_geocode.country || null;
-          context.admin1 = loc.reverse_geocode.state || null; // or "province"
+      // Try multiple known paths — Facebook changes these periodically
+      const candidates = [
+        state.marketplace?.user_current_location,
+        state.marketplace?.saved_searches_location,
+        state.marketplace?.marketplaceUserCurrentLocation,
+        state.marketplaceUserCurrentLocation,
+        state.marketplace?.location,
+        state.currentLocation,
+      ];
+
+      const loc = candidates.find(l => l && (l.latitude || l.lat));
+
+      if (loc) {
+        context.lat = loc.latitude ?? loc.lat ?? null;
+        context.lon = loc.longitude ?? loc.lon ?? loc.lng ?? null;
+
+        const rg = loc.reverse_geocode || loc.reverseGeocode || loc.geocode;
+        if (rg) {
+          context.country = rg.country || rg.countryCode || null;
+          context.admin1 = rg.state || rg.province || rg.region || null;
         }
       }
     } catch (e) { console.warn("Marketplace location detection failed", e); }
