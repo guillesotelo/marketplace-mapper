@@ -16,6 +16,8 @@ let contextSamples = [];
 let lastIncomingContext = null;
 const CONTEXT_SAMPLE_LIMIT = 7;
 
+let lastOpenedItemKey = null;
+
 // -----------------------------
 // Detect new search
 // -----------------------------
@@ -83,13 +85,12 @@ function openListingOnMapByUrl(currentUrl) {
 // Load City DB
 // -----------------------------
 async function loadCityDB() {
-    const url = chrome.runtime.getURL("data/cities_db.json");
+    const url = chrome.runtime.getURL("data/cities_db.json.gz");
     const res = await fetch(url);
     const buf = await res.arrayBuffer();
 
-    let arr = JSON.parse(new TextDecoder().decode(
-        new Uint8Array(buf)
-    ));
+    const decompressed = pako.inflate(new Uint8Array(buf));
+    let arr = JSON.parse(new TextDecoder().decode(decompressed));
 
     // If arr is an object (dictionary), convert to array of city objects
     if (!Array.isArray(arr)) {
@@ -510,9 +511,37 @@ document.addEventListener("DOMContentLoaded", () => {
 // Receive listings
 // -----------------------------
 window.addEventListener("message", (event) => {
+    if (event.data.source !== "marketplace-mapper") return;
+
     const itemView = isItemView(event.data);
 
-    if (event.data.source !== "marketplace-mapper" || itemView) return;
+    // Item view: add item marker if missing, open popup once, then ignore subsequent messages
+    if (itemView) {
+        const itemKey = extractMarketplaceItemKey(event.data.url);
+
+        if (!markerByItemKey.has(itemKey)) {
+            mergeListings(event.data.listings, event.data.context);
+            for (const l of globalListings) {
+                if (l._rendered) continue;
+                addMarkerToMap(l);
+                l._rendered = true;
+                if (!initialLocationSet && l.jLat && l.jLon) {
+                    initialLocationSet = true;
+                    map.setView([l.jLat, l.jLon], 11);
+                    document.getElementById("map-loading")?.remove();
+                }
+            }
+        }
+
+        if (itemKey !== lastOpenedItemKey && markerByItemKey.has(itemKey)) {
+            lastOpenedItemKey = itemKey;
+            openListingOnMapByUrl(event.data.url);
+        }
+        return;
+    }
+
+    // Leaving item view
+    lastOpenedItemKey = null;
 
     const newSearch = isNewSearch(event.data);
 
@@ -553,12 +582,8 @@ window.addEventListener("message", (event) => {
             if (viewLat && viewLon) {
                 initialLocationSet = true;
                 map.setView([viewLat, viewLon], 11);
-                const overlay = document.getElementById("map-loading");
-                if (overlay) overlay.remove();
+                document.getElementById("map-loading")?.remove();
             }
         }
     }
-
-    // Open lising popup if navigating item URL
-    openListingOnMapByUrl(event.data.url);
 });
