@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="../extension/leaflet/leaflet.css">
+    <style>
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 1280px;
+            height: 800px;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* ---------- Background ---------- */
+        #stage {
+            position: relative;
+            width: 1280px;
+            height: 800px;
+            background:
+                radial-gradient(900px 600px at 88% -10%, #55719f 0%, rgba(85, 113, 159, 0) 60%),
+                radial-gradient(800px 700px at -5% 105%, #22335c 0%, rgba(34, 51, 92, 0) 55%),
+                linear-gradient(135deg, #2c4070 0%, #354c80 55%, #3f5a96 100%);
+        }
+
+        .bg-pin {
+            position: absolute;
+            opacity: .07;
+            fill: #ffffff;
+        }
+
+        .bg-grid {
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, .045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, .045) 1px, transparent 1px);
+            background-size: 64px 64px;
+            mask-image: radial-gradient(700px 500px at 30% 40%, #000 0%, transparent 75%);
+            -webkit-mask-image: radial-gradient(700px 500px at 30% 40%, #000 0%, transparent 75%);
+        }
+
+        /* ---------- Left copy ---------- */
+        #copy {
+            position: absolute;
+            left: 72px;
+            top: 0;
+            bottom: 0;
+            width: 500px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            color: #fff;
+        }
+
+        #brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 34px;
+        }
+
+        #brand img {
+            width: 64px;
+            height: 64px;
+            padding: 7px;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+        }
+
+        #brand span {
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: .2px;
+        }
+
+        h1 {
+            margin: 0 0 18px;
+            font-size: 44px;
+            line-height: 1.14;
+            font-weight: 800;
+            letter-spacing: -.5px;
+        }
+
+        h1 em {
+            font-style: normal;
+            color: #ffc472;
+        }
+
+        #sub {
+            margin: 0 0 30px;
+            font-size: 19px;
+            line-height: 1.5;
+            color: #d6def2;
+            max-width: 440px;
+        }
+
+        ul.feats {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        ul.feats li {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 17px;
+            color: #eef2fb;
+        }
+
+        ul.feats .dot {
+            flex: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: rgba(255, 196, 114, .16);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        ul.feats .dot svg {
+            width: 16px;
+            height: 16px;
+            fill: #ffc472;
+        }
+
+        /* legend variant */
+        ul.legend {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        ul.legend li {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            font-size: 18px;
+            color: #eef2fb;
+        }
+
+        ul.legend .pin-demo {
+            flex: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 2.5px solid #fff;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, .45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        #store-note {
+            margin-top: 36px;
+            font-size: 14px;
+            color: #a9b7d9;
+        }
+
+        /* ---------- Extension window ---------- */
+        #window {
+            position: absolute;
+            right: 84px;
+            top: 68px;
+            width: 520px;
+            height: 664px;
+            display: flex;
+            flex-direction: column;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow:
+                0 40px 90px rgba(10, 18, 40, .55),
+                0 12px 30px rgba(10, 18, 40, .45);
+        }
+
+        /* --- faithful copy of extension/map.html styles --- */
+        #mkp-mapper-header {
+            height: 45px;
+            flex: none;
+            background: #354c80;
+            color: #efefef;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 6px;
+            font-size: 20px;
+            font-weight: bold;
+            user-select: none;
+        }
+
+        #mkp-mapper-title {
+            font-size: 1.5rem;
+            margin: 0;
+            text-align: center;
+        }
+
+        #mkp-mapper-drag-handle {
+            color: #efefef;
+            border: none;
+            padding: 8px;
+            border-radius: .5rem;
+            margin-right: 1.4rem;
+        }
+
+        #mpk-mapper-controls {
+            display: flex;
+            flex-direction: row;
+            justify-content: end;
+        }
+
+        #mkp-mapper-close-map,
+        #mkp-mapper-minimize-map {
+            color: #efefef;
+            background: #354c80;
+            border: none;
+            padding: 0 8px;
+            cursor: pointer;
+            font-size: 1.3rem;
+            font-weight: bold !important;
+            border-radius: .5rem !important;
+            font-family: inherit;
+        }
+
+        #mkp-mapper-minimize-map {
+            font-size: 1.7rem;
+        }
+
+        #mkp-mapper-map {
+            flex: 1;
+            position: relative;
+        }
+
+        #mkp-mapper-footer {
+            background: #354c80;
+            color: #efefef;
+        }
+
+        #mkp-mapper-footer p {
+            margin: .15rem .3rem;
+            font-size: .7rem;
+        }
+
+        #mkp-mapper-footer #mkp-scroll-hint {
+            color: #ffc472;
+        }
+
+        #mkp-mapper-footer #mkp-scroll-contact {
+            font-size: .6rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #mkp-mapper-footer a {
+            color: #ffc472;
+            text-decoration: underline;
+        }
+
+        #mkp-mapper-tools {
+            position: relative;
+            background: #354c80;
+            color: #efefef;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 6px;
+            border-top: 1px solid #2b3f6b;
+        }
+
+        .mkp-tool-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            background: transparent;
+            color: #cdd6ee;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .mkp-tool-btn.active {
+            background: #ffc472;
+            color: #354c80;
+        }
+
+        .mkp-tool-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        .mkp-tool-sep {
+            width: 1px;
+            height: 18px;
+            background: #2b3f6b;
+            margin: 0 2px;
+        }
+
+        #mkp-price-panel {
+            display: none;
+            position: absolute;
+            bottom: 40px;
+            right: 6px;
+            background: #fff;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+            padding: 10px;
+            z-index: 1200;
+            font-size: .75rem;
+        }
+
+        #mkp-price-panel .mkp-price-title {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        #mkp-price-panel .mkp-price-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        #mkp-price-panel input {
+            width: 72px;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: .75rem;
+            font-family: inherit;
+        }
+
+        #mkp-price-clear {
+            margin-top: 8px;
+            background: #354c80;
+            color: #fff;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: .7rem;
+        }
+
+        .mkp-pin-wrap {
+            background: transparent;
+            border: none;
+        }
+
+        .mkp-pin {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 11px;
+            line-height: 1;
+        }
+
+        .leaflet-popup-content {
+            margin: 8px;
+        }
+
+        .leaflet-popup-content a {
+            color: #0d6efd;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="stage">
+        <div class="bg-grid"></div>
+        <svg class="bg-pin" style="width:340px;top:-60px;right:-40px;transform:rotate(14deg);" viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/>
+        </svg>
+        <svg class="bg-pin" style="width:200px;bottom:-30px;left:420px;transform:rotate(-12deg);" viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/>
+        </svg>
+
+        <div id="copy">
+            <div id="brand">
+                <img src="../extension/assets/icons/mkpm128.png" alt="">
+                <span>Marketplace Map</span>
+            </div>
+            <h1 id="headline"></h1>
+            <p id="sub"></p>
+            <div id="feature-slot"></div>
+            <p id="store-note">Works right on facebook.com/marketplace — no account, no setup.</p>
+        </div>
+
+        <div id="window">
+            <div id="mkp-mapper-header">
+                <svg id="mkp-mapper-drag-handle" xmlns="http://www.w3.org/2000/svg" width="20px" height="20px"
+                    viewBox="0 0 24 24" fill="#fff">
+                    <path
+                        d="M16.1924 5.65683C16.5829 5.2663 16.5829 4.63314 16.1924 4.24261L13.364 1.41419C12.5829 0.633139 11.3166 0.633137 10.5355 1.41419L7.70711 4.24261C7.31658 4.63314 7.31658 5.2663 7.70711 5.65683C8.09763 6.04735 8.73079 6.04735 9.12132 5.65683L11 3.77812V11.0503H3.72784L5.60655 9.17157C5.99707 8.78104 5.99707 8.14788 5.60655 7.75735C5.21602 7.36683 4.58286 7.36683 4.19234 7.75735L1.36391 10.5858C0.582863 11.3668 0.582859 12.6332 1.36391 13.4142L4.19234 16.2426C4.58286 16.6332 5.21603 16.6332 5.60655 16.2426C5.99707 15.8521 5.99707 15.219 5.60655 14.8284L3.8284 13.0503H11V20.2219L9.12132 18.3432C8.73079 17.9526 8.09763 17.9526 7.7071 18.3432C7.31658 18.7337 7.31658 19.3669 7.7071 19.7574L10.5355 22.5858C11.3166 23.3669 12.5829 23.3669 13.364 22.5858L16.1924 19.7574C16.5829 19.3669 16.5829 18.7337 16.1924 18.3432C15.8019 17.9526 15.1687 17.9526 14.7782 18.3432L13 20.1213V13.0503H20.071L18.2929 14.8284C17.9024 15.219 17.9024 15.8521 18.2929 16.2426C18.6834 16.6332 19.3166 16.6332 19.7071 16.2426L22.5355 13.4142C23.3166 12.6332 23.3166 11.3668 22.5355 10.5858L19.7071 7.75735C19.3166 7.36683 18.6834 7.36683 18.2929 7.75735C17.9024 8.14788 17.9024 8.78104 18.2929 9.17157L20.1716 11.0503H13V3.87867L14.7782 5.65683C15.1687 6.04735 15.8019 6.04735 16.1924 5.65683Z"
+                        fill="#fff" />
+                </svg>
+                <h1 id="mkp-mapper-title">MKP Map</h1>
+                <div id="mpk-mapper-controls">
+                    <button id="mkp-mapper-minimize-map">–</button>
+                    <button id="mkp-mapper-close-map">X</button>
+                </div>
+            </div>
+            <div id="mkp-mapper-map"></div>
+            <div id="mkp-mapper-tools">
+                <button class="mkp-tool-btn" id="mkp-tool-autoload">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
+                    </svg>
+                </button>
+                <span class="mkp-tool-sep"></span>
+                <button class="mkp-tool-btn" id="mkp-tool-bookmarks">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                    </svg>
+                </button>
+                <button class="mkp-tool-btn" id="mkp-tool-free">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z" />
+                    </svg>
+                </button>
+                <button class="mkp-tool-btn" id="mkp-tool-price">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z" />
+                    </svg>
+                </button>
+                <span class="mkp-tool-sep"></span>
+                <button class="mkp-tool-btn" id="mkp-tool-color">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+                    </svg>
+                </button>
+                <div id="mkp-price-panel">
+                    <div class="mkp-price-title">Price range</div>
+                    <div class="mkp-price-row">
+                        <input type="number" id="mkp-price-min" placeholder="Min" min="0">
+                        <span>–</span>
+                        <input type="number" id="mkp-price-max" placeholder="Max" min="0">
+                    </div>
+                    <button id="mkp-price-clear">Clear</button>
+                </div>
+            </div>
+            <div id="mkp-mapper-footer">
+                <p id="mkp-scroll-hint">↕ Scroll the page to load more listings onto the map.</p>
+                <p id="mkp-scroll-contact">
+                    <span>Approximate locations</span>
+                    <a href="#">Contact the creator</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="../extension/leaflet/leaflet.js"></script>
+    <script>
+        const MARKER_COLORS = {
+            default: "#3b6fd4",
+            bookmark: "#f4b400",
+            free: "#0f9d58",
+            fresh: "#ff6d00"
+        };
+
+        // Listing photo drawn as an inline SVG (sofa) — self-contained
+        const sofaImg = "data:image/svg+xml;utf8," + encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="400" height="230" viewBox="0 0 400 230">
+            <rect width="400" height="230" fill="#e9e4dc"/>
+            <rect x="0" y="168" width="400" height="62" fill="#cbc2b4"/>
+            <rect x="30" y="24" width="90" height="120" rx="6" fill="#d8d2c6"/>
+            <rect x="40" y="34" width="70" height="100" fill="#b9ccd8"/>
+            <g>
+              <rect x="150" y="88" width="220" height="26" rx="10" fill="#5b7a94"/>
+              <rect x="146" y="60" width="228" height="44" rx="14" fill="#6e8ca6"/>
+              <rect x="150" y="104" width="102" height="34" rx="8" fill="#7d9ab2"/>
+              <rect x="268" y="104" width="102" height="34" rx="8" fill="#7d9ab2"/>
+              <rect x="138" y="86" width="22" height="58" rx="10" fill="#5b7a94"/>
+              <rect x="360" y="86" width="22" height="58" rx="10" fill="#5b7a94"/>
+              <rect x="140" y="132" width="240" height="20" rx="8" fill="#54718a"/>
+              <rect x="152" y="152" width="12" height="18" fill="#3e3a34"/>
+              <rect x="356" y="152" width="12" height="18" fill="#3e3a34"/>
+              <rect x="196" y="70" width="42" height="30" rx="6" fill="#e0b36a" transform="rotate(-6 217 85)"/>
+            </g>
+            <ellipse cx="260" cy="176" rx="130" ry="10" fill="#00000012"/>
+        </svg>`);
+
+        const bikeImg = "data:image/svg+xml;utf8," + encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="400" height="230" viewBox="0 0 400 230">
+            <rect width="400" height="230" fill="#dfe7e2"/>
+            <rect x="0" y="170" width="400" height="60" fill="#b9c6bd"/>
+            <g stroke="#33414f" stroke-width="7" fill="none" stroke-linecap="round">
+              <circle cx="120" cy="150" r="44"/>
+              <circle cx="290" cy="150" r="44"/>
+              <path d="M120 150 L185 78 L268 78 L290 150 L200 150 L165 96"/>
+              <path d="M120 150 L165 96"/>
+              <path d="M185 78 L172 62 M160 62 h24"/>
+              <path d="M268 78 L262 58 M248 58 h28"/>
+            </g>
+            <circle cx="200" cy="150" r="10" fill="#e0632f"/>
+            <ellipse cx="205" cy="200" rx="150" ry="8" fill="#00000012"/>
+        </svg>`);
+
+        function makePinIcon(color, starred) {
+            return L.divIcon({
+                className: "mkp-pin-wrap",
+                html: `<div class="mkp-pin" style="background:${color}">${starred ? "★" : ""}</div>`,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+                popupAnchor: [0, -10]
+            });
+        }
+
+        function popupHtml(l) {
+            return `
+            <div style="position: relative;">
+                ${l.badge ? `<p style="margin:0;font-size:.75rem;font-style:italic;position:absolute;top:0;left:0;z-index:5;padding:.2rem .4rem;background:#fff;border-top-left-radius:.5rem;border-bottom-right-radius:.5rem;">${l.badge}</p>` : ""}
+                <img src="${l.image}" style="width:100%;height:auto;display:block;border-radius:.3rem .3rem 0 0;">
+            </div>
+            <div style="display:flex;flex-direction:column;margin:.4rem .5rem .5rem;">
+                <p style="margin:0;font-size:.9rem;font-weight:bold;">${l.price}</p>
+                <p style="margin:0;">${l.title}</p>
+                <p style="margin:0 0 .3rem 0;font-size:.8rem;color:#858585;">${l.location}</p>
+                <div style="display:flex;align-items:center;gap:.6rem;">
+                    <a href="#">Open Listing</a>
+                    <button type="button" style="background:none;border:none;cursor:pointer;font-size:.9rem;color:#b8860b;padding:0;">${l.starred ? "★ Saved" : "☆ Save"}</button>
+                </div>
+            </div>`;
+        }
+
+        // Amsterdam — dense streets + canals look great on Voyager tiles
+        const CENTER = [52.3676, 4.9041];
+
+        const map = L.map("mkp-mapper-map", {
+            zoomControl: true,
+            fadeAnimation: false,
+            zoomAnimation: false,
+            markerZoomAnimation: false,
+            attributionControl: true
+        }).setView(CENTER, 13);
+
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // listings: [lat, lon, kind]
+        const spots = [
+            [52.3702, 4.8850, "default"],
+            [52.3579, 4.8686, "default"],
+            [52.3789, 4.9000, "default"],
+            [52.3538, 4.9110, "default"],
+            [52.3745, 4.9245, "fresh"],
+            [52.3620, 4.9330, "default"],
+            [52.3838, 4.8770, "free"],
+            [52.3499, 4.8930, "default"],
+            [52.3775, 4.9128, "bookmark"],
+            [52.3596, 4.9000, "fresh"],
+            [52.3660, 4.8600, "default"],
+            [52.3862, 4.9060, "default"]
+        ];
+
+        const variant = (location.hash || "#hero").slice(1);
+
+        const useFreshColors = variant === "pins";
+        const markers = {};
+        spots.forEach(([lat, lon, kind], i) => {
+            let color = MARKER_COLORS.default;
+            if (kind === "bookmark") color = MARKER_COLORS.bookmark;
+            else if (useFreshColors && kind in MARKER_COLORS) color = MARKER_COLORS[kind];
+            const m = L.marker([lat, lon], { icon: makePinIcon(color, kind === "bookmark") }).addTo(map);
+            markers[i] = m;
+        });
+
+        const headline = document.getElementById("headline");
+        const sub = document.getElementById("sub");
+        const slot = document.getElementById("feature-slot");
+
+        function activate(id) { document.getElementById(id).classList.add("active"); }
+
+        if (variant === "hero") {
+            headline.innerHTML = 'Every listing,<br>on <em>one map</em>';
+            sub.textContent = "Marketplace Map adds a live, draggable map to Facebook Marketplace. Browse by neighborhood instead of scrolling an endless feed.";
+            slot.innerHTML = `
+                <ul class="feats">
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></span>A pin for every listing as you browse</li>
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></span>Photo, price &amp; location at a glance</li>
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM5 5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-7h-2v7H5V7h7V5H5z"/></svg></span>Open the listing in one click</li>
+                </ul>`;
+            L.marker([52.3562, 4.9125], { icon: makePinIcon(MARKER_COLORS.default, false) })
+                .addTo(map)
+                .bindPopup(popupHtml({
+                    image: bikeImg, badge: "Just listed", price: "€120",
+                    title: "Vintage road bike — rides great", location: "Amsterdam Oost"
+                }), { autoPan: false }).openPopup();
+        } else if (variant === "filters") {
+            headline.innerHTML = 'Cut the noise with <em>smart filters</em>';
+            sub.textContent = "Set a price range, show free items only, or keep just your saved favorites on the map. The pins update instantly.";
+            slot.innerHTML = `
+                <ul class="feats">
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg></span>Min–max price range</li>
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg></span>Free items only</li>
+                    <li><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>Bookmarked favorites only</li>
+                </ul>`;
+            activate("mkp-tool-price");
+            const panel = document.getElementById("mkp-price-panel");
+            panel.style.display = "block";
+            document.getElementById("mkp-price-min").value = 0;
+            document.getElementById("mkp-price-max").value = 250;
+        } else { // pins
+            headline.innerHTML = 'Spot the <em>good stuff</em> instantly';
+            sub.textContent = "Turn on color mode and the pins tell the story: fresh finds, freebies and your saved favorites stand out from the crowd.";
+            slot.innerHTML = `
+                <ul class="legend">
+                    <li><span class="pin-demo" style="background:${MARKER_COLORS.default}"></span>Regular listing</li>
+                    <li><span class="pin-demo" style="background:${MARKER_COLORS.fresh}"></span>Just listed</li>
+                    <li><span class="pin-demo" style="background:${MARKER_COLORS.free}"></span>Free item</li>
+                    <li><span class="pin-demo" style="background:${MARKER_COLORS.bookmark}">★</span>Saved to bookmarks</li>
+                </ul>`;
+            activate("mkp-tool-color");
+            L.marker([52.3548, 4.8795], { icon: makePinIcon(MARKER_COLORS.free, false) })
+                .addTo(map)
+                .bindPopup(popupHtml({
+                    image: sofaImg, badge: "Just listed", price: "Free",
+                    title: "3-seat sofa, pickup only", location: "Amsterdam West"
+                }), { autoPan: false }).openPopup();
+        }
+    </script>
+</body>
+
+</html>

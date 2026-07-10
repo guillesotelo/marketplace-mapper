@@ -42,6 +42,40 @@ function onRouteChange() {
   }
 }
 
+// -----------------------------
+// Auto-load listings (feature-flagged; enabled by the UI toggle)
+//
+// Marketplace lazy-loads listings only as the main page scrolls into view.
+// This does a one-time downward sweep to force more listings into the DOM so
+// the 2s scraper can capture them (the map accumulates + dedupes), then
+// restores the original scroll position. Disabled by default.
+// -----------------------------
+let autoScrollRunning = false;
+
+async function runAutoScrollSweep() {
+  if (autoScrollRunning) return;
+  // Skip on item view — auto-scrolling a single listing page is just annoying
+  if (location.href.includes('/item/')) return;
+  autoScrollRunning = true;
+
+  const startY = window.scrollY;
+  const step = window.innerHeight * 0.9;
+  const maxSteps = 30;
+  const delayMs = 450;
+
+  try {
+    for (let i = 0; i < maxSteps; i++) {
+      window.scrollBy(0, step);
+      await new Promise(r => setTimeout(r, delayMs));
+      // Stop early if we've reached the bottom
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 5) break;
+    }
+  } finally {
+    window.scrollTo({ top: startY, behavior: "auto" });
+    autoScrollRunning = false;
+  }
+}
+
 function injectMap() {
 
   // Inject iframe only once
@@ -146,6 +180,11 @@ function injectMap() {
       else if (event.data.type === "minimize-map") {
         const newHeight = event.data.height || iframeHeight
         iframe.style.height = newHeight
+      }
+
+      else if (event.data.type === "toggle-autoscroll") {
+        // Feature-flagged: only sweeps when the UI toggle is enabled
+        if (event.data.enabled) runAutoScrollSweep();
       }
     });
 

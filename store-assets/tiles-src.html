@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="../extension/leaflet/leaflet.css">
+    <style>
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #stage {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(900px 600px at 88% -10%, #55719f 0%, rgba(85, 113, 159, 0) 60%),
+                radial-gradient(800px 700px at -5% 105%, #22335c 0%, rgba(34, 51, 92, 0) 55%),
+                linear-gradient(135deg, #2c4070 0%, #354c80 55%, #3f5a96 100%);
+        }
+
+        body.small, body.small #stage { width: 440px; height: 280px; }
+        body.marquee, body.marquee #stage { width: 1400px; height: 560px; }
+
+        .bg-pin {
+            position: absolute;
+            opacity: .07;
+            fill: #ffffff;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 18px 45px rgba(10, 18, 40, .45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card img { display: block; }
+
+        /* ---------- small tile ---------- */
+        body.small .card {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 330px;
+            height: 186px;
+        }
+
+        body.small .card img { width: 280px; }
+
+        /* ---------- marquee ---------- */
+        body.marquee #copy {
+            position: absolute;
+            left: 90px;
+            top: 0;
+            bottom: 0;
+            width: 560px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            color: #fff;
+        }
+
+        body.marquee .card {
+            width: 350px;
+            height: 196px;
+            margin-bottom: 36px;
+        }
+
+        body.marquee .card img { width: 296px; }
+
+        body.marquee h1 {
+            margin: 0 0 14px;
+            font-size: 46px;
+            line-height: 1.12;
+            font-weight: 800;
+            letter-spacing: -.5px;
+        }
+
+        body.marquee h1 em {
+            font-style: normal;
+            color: #ffc472;
+        }
+
+        body.marquee #sub {
+            margin: 0;
+            font-size: 20px;
+            line-height: 1.45;
+            color: #d6def2;
+            max-width: 520px;
+        }
+
+        /* ---------- extension window (copied from map.html) ---------- */
+        #window {
+            position: absolute;
+            right: 84px;
+            top: 40px;
+            width: 520px;
+            height: 664px;
+            transform: scale(.725);
+            transform-origin: top right;
+            display: flex;
+            flex-direction: column;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow:
+                0 40px 90px rgba(10, 18, 40, .55),
+                0 12px 30px rgba(10, 18, 40, .45);
+        }
+
+        body.small #window { display: none; }
+
+        body.small #headline,
+        body.small #sub { display: none; }
+
+        #mkp-mapper-header {
+            height: 45px;
+            flex: none;
+            background: #354c80;
+            color: #efefef;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 6px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        #mkp-mapper-title { font-size: 1.5rem; margin: 0; }
+
+        #mkp-mapper-drag-handle { padding: 8px; margin-right: 1.4rem; }
+
+        #mpk-mapper-controls { display: flex; }
+
+        #mkp-mapper-close-map,
+        #mkp-mapper-minimize-map {
+            color: #efefef;
+            background: #354c80;
+            border: none;
+            padding: 0 8px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            border-radius: .5rem;
+            font-family: inherit;
+        }
+
+        #mkp-mapper-minimize-map { font-size: 1.7rem; }
+
+        #mkp-mapper-map { flex: 1; position: relative; }
+
+        #mkp-mapper-tools {
+            position: relative;
+            background: #354c80;
+            color: #efefef;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 6px;
+            border-top: 1px solid #2b3f6b;
+        }
+
+        .mkp-tool-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: transparent;
+            color: #cdd6ee;
+            border: none;
+            border-radius: 6px;
+        }
+
+        .mkp-tool-btn.active { background: #ffc472; color: #354c80; }
+
+        .mkp-tool-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+        .mkp-tool-sep { width: 1px; height: 18px; background: #2b3f6b; margin: 0 2px; }
+
+        #mkp-mapper-footer { background: #354c80; color: #efefef; }
+
+        #mkp-mapper-footer p { margin: .15rem .3rem; font-size: .7rem; }
+
+        #mkp-mapper-footer #mkp-scroll-hint { color: #ffc472; }
+
+        #mkp-mapper-footer #mkp-scroll-contact {
+            font-size: .6rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #mkp-mapper-footer a { color: #ffc472; text-decoration: underline; }
+
+        .mkp-pin-wrap { background: transparent; border: none; }
+
+        .mkp-pin {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 11px;
+            line-height: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="stage">
+        <svg class="bg-pin" id="pin-tr" viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/>
+        </svg>
+        <svg class="bg-pin" id="pin-bl" viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/>
+        </svg>
+
+        <div id="copy">
+            <div class="card"><img src="logo-wide.png" alt="Marketplace Map"></div>
+            <h1 id="headline">Every listing, on <em>one map</em></h1>
+            <p id="sub">Browse Facebook Marketplace by neighborhood — pins, prices, photos and filters, right on the page.</p>
+        </div>
+
+        <div id="window">
+            <div id="mkp-mapper-header">
+                <svg id="mkp-mapper-drag-handle" xmlns="http://www.w3.org/2000/svg" width="20px" height="20px"
+                    viewBox="0 0 24 24" fill="#fff">
+                    <path
+                        d="M16.1924 5.65683C16.5829 5.2663 16.5829 4.63314 16.1924 4.24261L13.364 1.41419C12.5829 0.633139 11.3166 0.633137 10.5355 1.41419L7.70711 4.24261C7.31658 4.63314 7.31658 5.2663 7.70711 5.65683C8.09763 6.04735 8.73079 6.04735 9.12132 5.65683L11 3.77812V11.0503H3.72784L5.60655 9.17157C5.99707 8.78104 5.99707 8.14788 5.60655 7.75735C5.21602 7.36683 4.58286 7.36683 4.19234 7.75735L1.36391 10.5858C0.582863 11.3668 0.582859 12.6332 1.36391 13.4142L4.19234 16.2426C4.58286 16.6332 5.21603 16.6332 5.60655 16.2426C5.99707 15.8521 5.99707 15.219 5.60655 14.8284L3.8284 13.0503H11V20.2219L9.12132 18.3432C8.73079 17.9526 8.09763 17.9526 7.7071 18.3432C7.31658 18.7337 7.31658 19.3669 7.7071 19.7574L10.5355 22.5858C11.3166 23.3669 12.5829 23.3669 13.364 22.5858L16.1924 19.7574C16.5829 19.3669 16.5829 18.7337 16.1924 18.3432C15.8019 17.9526 15.1687 17.9526 14.7782 18.3432L13 20.1213V13.0503H20.071L18.2929 14.8284C17.9024 15.219 17.9024 15.8521 18.2929 16.2426C18.6834 16.6332 19.3166 16.6332 19.7071 16.2426L22.5355 13.4142C23.3166 12.6332 23.3166 11.3668 22.5355 10.5858L19.7071 7.75735C19.3166 7.36683 18.6834 7.36683 18.2929 7.75735C17.9024 8.14788 17.9024 8.78104 18.2929 9.17157L20.1716 11.0503H13V3.87867L14.7782 5.65683C15.1687 6.04735 15.8019 6.04735 16.1924 5.65683Z"
+                        fill="#fff" />
+                </svg>
+                <h1 id="mkp-mapper-title">MKP Map</h1>
+                <div id="mpk-mapper-controls">
+                    <button id="mkp-mapper-minimize-map">–</button>
+                    <button id="mkp-mapper-close-map">X</button>
+                </div>
+            </div>
+            <div id="mkp-mapper-map"></div>
+            <div id="mkp-mapper-tools">
+                <button class="mkp-tool-btn">
+                    <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" /></svg>
+                </button>
+                <span class="mkp-tool-sep"></span>
+                <button class="mkp-tool-btn">
+                    <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" /></svg>
+                </button>
+                <button class="mkp-tool-btn">
+                    <svg viewBox="0 0 24 24"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z" /></svg>
+                </button>
+                <button class="mkp-tool-btn">
+                    <svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z" /></svg>
+                </button>
+                <span class="mkp-tool-sep"></span>
+                <button class="mkp-tool-btn active">
+                    <svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" /></svg>
+                </button>
+            </div>
+            <div id="mkp-mapper-footer">
+                <p id="mkp-scroll-hint">↕ Scroll the page to load more listings onto the map.</p>
+                <p id="mkp-scroll-contact">
+                    <span>Approximate locations</span>
+                    <a href="#">Contact the creator</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="../extension/leaflet/leaflet.js"></script>
+    <script>
+        const variant = (location.hash || "#small").slice(1);
+        document.body.className = variant;
+
+        const pinTR = document.getElementById("pin-tr");
+        const pinBL = document.getElementById("pin-bl");
+        if (variant === "small") {
+            pinTR.style.cssText = "width:150px;top:-30px;right:-20px;transform:rotate(14deg);";
+            pinBL.style.cssText = "width:110px;bottom:-24px;left:-14px;transform:rotate(-12deg);";
+        } else {
+            pinTR.style.cssText = "width:300px;top:-70px;right:530px;transform:rotate(14deg);";
+            pinBL.style.cssText = "width:190px;bottom:-40px;left:660px;transform:rotate(-12deg);";
+        }
+
+        if (variant === "marquee") {
+            const MARKER_COLORS = {
+                default: "#3b6fd4",
+                bookmark: "#f4b400",
+                free: "#0f9d58",
+                fresh: "#ff6d00"
+            };
+
+            function makePinIcon(color, starred) {
+                return L.divIcon({
+                    className: "mkp-pin-wrap",
+                    html: `<div class="mkp-pin" style="background:${color}">${starred ? "★" : ""}</div>`,
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+            }
+
+            const map = L.map("mkp-mapper-map", {
+                zoomControl: true,
+                fadeAnimation: false,
+                zoomAnimation: false,
+                markerZoomAnimation: false
+            }).setView([52.3676, 4.9041], 13);
+
+            L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            }).addTo(map);
+
+            const spots = [
+                [52.3702, 4.8850, "default"],
+                [52.3579, 4.8686, "default"],
+                [52.3789, 4.9000, "default"],
+                [52.3538, 4.9110, "free"],
+                [52.3745, 4.9245, "fresh"],
+                [52.3620, 4.9330, "default"],
+                [52.3838, 4.8770, "default"],
+                [52.3499, 4.8930, "default"],
+                [52.3775, 4.9128, "bookmark"],
+                [52.3596, 4.9000, "fresh"],
+                [52.3660, 4.8600, "default"],
+                [52.3862, 4.9060, "default"]
+            ];
+            spots.forEach(([lat, lon, kind]) => {
+                L.marker([lat, lon], {
+                    icon: makePinIcon(MARKER_COLORS[kind], kind === "bookmark")
+                }).addTo(map);
+            });
+        }
+    </script>
+</body>
+
+</html>

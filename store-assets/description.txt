@@ -1,0 +1,18 @@
+Marketplace Map enhances your Facebook Marketplace experience by displaying listings on an interactive map.
+
+Browse by city or neighborhood, compare prices and photos at a glance, and quickly explore nearby offers — every listing you scroll past becomes a pin on the map.
+
+FEATURES
+• Interactive map — a pin for every listing; hover for a photo-and-price preview, click to open the listing
+• Smart filters — set a min–max price range, show free items only, or keep just your saved favorites on the map
+• Bookmarks — star interesting listings and spot them instantly as gold pins
+• Color-coded pins — highlight free items and fresh "just listed" finds at a glance
+• Auto-load — optionally scrolls the page once on load to pull more listings onto the map
+• Draggable, minimizable window that stays out of your way while you browse
+
+FAST & PRIVACY-FRIENDLY
+Uses smart offline location matching to place listings accurately while keeping everything fast and privacy-friendly. No account, no setup, and your browsing data never leaves your device.
+
+Perfect for buyers who want a clear geographic overview of available Marketplace listings.
+
+For feedback or contact purposes, please refer to the support URL below.

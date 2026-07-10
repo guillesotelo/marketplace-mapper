@@ -19,6 +19,225 @@ const CONTEXT_SAMPLE_LIMIT = 7;
 let lastOpenedItemKey = null;
 
 // -----------------------------
+// Tools / filters state
+// -----------------------------
+const MARKER_COLORS = {
+    default: "#3b6fd4",
+    bookmark: "#f4b400",
+    free: "#0f9d58",
+    fresh: "#ff6d00"
+};
+
+const FREE_WORDS = [
+    "free", "gratis", "kostenlos",
+    "gratuit", "gratuito", "gratuita",
+    "za darmo", "besplatno",
+    "ilmainen", "ingyenes",
+    "бесплатно"
+];
+
+let bookmarks = loadBookmarks();      // Set of itemKeys
+let filterBookmarksOnly = false;
+let filterFreeOnly = false;
+let colorByFreshness = false;
+let priceMin = null;
+let priceMax = null;
+
+// -----------------------------
+// Bookmarks persistence
+// -----------------------------
+function loadBookmarks() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem("mkpm-bookmarks") || "[]"));
+    } catch {
+        return new Set();
+    }
+}
+
+function saveBookmarks() {
+    localStorage.setItem("mkpm-bookmarks", JSON.stringify([...bookmarks]));
+}
+
+// -----------------------------
+// Free-item detection (mirrors content.js FREE_WORDS)
+// -----------------------------
+function isFreeListing(price) {
+    if (!price) return false;
+    const t = String(price).toLowerCase().trim();
+    return FREE_WORDS.some(w => t === w || t.startsWith(w + " ") || t.startsWith(w));
+}
+
+// -----------------------------
+// Extract a comparable numeric value from a price string.
+// Handles thousands/decimal separators across locales; free = 0.
+// -----------------------------
+function extractPriceValue(price) {
+    if (price == null) return null;
+    if (isFreeListing(price)) return 0;
+
+    const m = String(price).match(/\d[\d.,\s]*\d|\d/);
+    if (!m) return null;
+
+    let s = m[0].replace(/\s/g, "");
+
+    // Drop a trailing decimal group (1-2 digits after the last separator)
+    const dec = s.match(/[.,]\d{1,2}$/);
+    if (dec) s = s.slice(0, dec.index);
+
+    s = s.replace(/[.,]/g, "");
+    const val = parseInt(s, 10);
+    return Number.isFinite(val) ? val : null;
+}
+
+// -----------------------------
+// Marker color + icon
+// -----------------------------
+function getMarkerColor(listing, itemKey) {
+    if (itemKey && bookmarks.has(itemKey)) return MARKER_COLORS.bookmark;
+    if (colorByFreshness) {
+        if (isFreeListing(listing.price)) return MARKER_COLORS.free;
+        if (listing.badge) return MARKER_COLORS.fresh;
+    }
+    return MARKER_COLORS.default;
+}
+
+function makePinIcon(color, starred) {
+    return L.divIcon({
+        className: "mkp-pin-wrap",
+        html: `<div class="mkp-pin" style="background:${color}">${starred ? "★" : ""}</div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -10],
+        tooltipAnchor: [11, 0]
+    });
+}
+
+// -----------------------------
+// Filters
+// -----------------------------
+function passesFilters(listing, itemKey) {
+    if (filterBookmarksOnly && !(itemKey && bookmarks.has(itemKey))) return false;
+    if (filterFreeOnly && !isFreeListing(listing.price)) return false;
+
+    if (priceMin != null || priceMax != null) {
+        const val = extractPriceValue(listing.price);
+        if (val != null) { // unparseable prices stay visible
+            if (priceMin != null && val < priceMin) return false;
+            if (priceMax != null && val > priceMax) return false;
+        }
+    }
+    return true;
+}
+
+function updateMarkerVisibility(marker) {
+    const show = passesFilters(marker.listing, marker.itemKey);
+    if (show) {
+        if (!markerLayerGroup.hasLayer(marker)) markerLayerGroup.addLayer(marker);
+    } else if (markerLayerGroup.hasLayer(marker)) {
+        markerLayerGroup.removeLayer(marker);
+    }
+}
+
+function applyFilters() {
+    for (const m of markers) updateMarkerVisibility(m);
+}
+
+function refreshMarkerStyles() {
+    for (const m of markers) {
+        m.setIcon(makePinIcon(getMarkerColor(m.listing, m.itemKey), bookmarks.has(m.itemKey)));
+    }
+}
+
+// -----------------------------
+// Wire up the tools row
+// -----------------------------
+function setBtnActive(btn, on) {
+    if (btn) btn.classList.toggle("active", !!on);
+}
+
+function setupTools() {
+    // Auto-load listings (runs in the page via content.js)
+    const autoBtn = document.getElementById("mkp-tool-autoload");
+    if (autoBtn) {
+        const savedAuto = localStorage.getItem("mkpm-autoscroll") === "true";
+        setBtnActive(autoBtn, savedAuto);
+        if (savedAuto) parent.postMessage({ type: "toggle-autoscroll", enabled: true }, "*");
+
+        autoBtn.addEventListener("click", () => {
+            const on = !autoBtn.classList.contains("active");
+            setBtnActive(autoBtn, on);
+            localStorage.setItem("mkpm-autoscroll", String(on));
+            parent.postMessage({ type: "toggle-autoscroll", enabled: on }, "*");
+        });
+    }
+
+    // Bookmarks only
+    const bmBtn = document.getElementById("mkp-tool-bookmarks");
+    if (bmBtn) {
+        bmBtn.addEventListener("click", () => {
+            filterBookmarksOnly = !filterBookmarksOnly;
+            setBtnActive(bmBtn, filterBookmarksOnly);
+            applyFilters();
+        });
+    }
+
+    // Free items only
+    const freeBtn = document.getElementById("mkp-tool-free");
+    if (freeBtn) {
+        freeBtn.addEventListener("click", () => {
+            filterFreeOnly = !filterFreeOnly;
+            setBtnActive(freeBtn, filterFreeOnly);
+            applyFilters();
+        });
+    }
+
+    // Color by freshness (persisted preference)
+    const colorBtn = document.getElementById("mkp-tool-color");
+    if (colorBtn) {
+        colorByFreshness = localStorage.getItem("mkpm-color-freshness") === "true";
+        setBtnActive(colorBtn, colorByFreshness);
+        colorBtn.addEventListener("click", () => {
+            colorByFreshness = !colorByFreshness;
+            setBtnActive(colorBtn, colorByFreshness);
+            localStorage.setItem("mkpm-color-freshness", String(colorByFreshness));
+            refreshMarkerStyles();
+        });
+    }
+
+    // Price range popover
+    const priceBtn = document.getElementById("mkp-tool-price");
+    const pricePanel = document.getElementById("mkp-price-panel");
+    const minInput = document.getElementById("mkp-price-min");
+    const maxInput = document.getElementById("mkp-price-max");
+    const clearBtn = document.getElementById("mkp-price-clear");
+
+    if (priceBtn && pricePanel && minInput && maxInput) {
+        priceBtn.addEventListener("click", () => {
+            pricePanel.style.display = pricePanel.style.display === "block" ? "none" : "block";
+        });
+
+        const onPrice = () => {
+            priceMin = minInput.value !== "" ? Number(minInput.value) : null;
+            priceMax = maxInput.value !== "" ? Number(maxInput.value) : null;
+            setBtnActive(priceBtn, priceMin != null || priceMax != null);
+            applyFilters();
+        };
+
+        minInput.addEventListener("input", onPrice);
+        maxInput.addEventListener("input", onPrice);
+
+        if (clearBtn) {
+            clearBtn.addEventListener("click", () => {
+                minInput.value = "";
+                maxInput.value = "";
+                onPrice();
+                pricePanel.style.display = "none";
+            });
+        }
+    }
+}
+
+// -----------------------------
 // Detect new search
 // -----------------------------
 function isNewSearch(data) {
@@ -294,12 +513,17 @@ function parsePrice(price) {
 // -----------------------------
 function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
+    const itemKey = extractMarketplaceItemKey(listing.url);
     let popupHtml = `
         <div style="display: flex; flex-direction: column; margin: 0 .5rem .5rem;">
             <p style="margin: 0; font-size: .9rem; font-weight: bold;">${parsePrice(listing.price)}<p>
             <p style="margin: 0;">${listing.title}</p>
             <p style="margin: 0 0 .3rem 0; font-size: .8rem; color: #858585;">${listing.location}</p>
-            <a href="${listing.url}" target="_blank">Open Listing</a>
+            <div style="display: flex; align-items: center; gap: .6rem;">
+                <a href="${listing.url}" target="_blank">Open Listing</a>
+                ${itemKey ? `<button class="mkp-bookmark-btn" type="button"
+                    style="background: none; border: none; cursor: pointer; font-size: .8rem; color: #b8860b; padding: 0;"></button>` : ""}
+            </div>
             </div>
             `;
     if (listing.image) {
@@ -331,15 +555,47 @@ function addMarkerToMap(listing) {
         <p style="font-size: .75rem; font-weight: bold; margin: .6rem .2rem; padding: 0;">${parsePrice(listing.price)}</p>
     `
 
-    const marker = L.marker([listing.jLat, listing.jLon])
-        .addTo(markerLayerGroup)
+    const marker = L.marker([listing.jLat, listing.jLon], {
+        icon: makePinIcon(getMarkerColor(listing, itemKey), itemKey && bookmarks.has(itemKey))
+    })
         .bindPopup(popupHtml)
         .bindTooltip(tooltipHtml);
 
-    markers.push(marker);
+    marker.listing = listing;
+    marker.itemKey = itemKey;
+    marker.on("popupopen", onPopupOpen);
 
-    const itemKey = extractMarketplaceItemKey(listing.url);
+    markers.push(marker);
     if (itemKey) markerByItemKey.set(itemKey, marker);
+
+    updateMarkerVisibility(marker);
+}
+
+// -----------------------------
+// Bookmark toggle inside a popup
+// -----------------------------
+function onPopupOpen(e) {
+    const marker = e.target;
+    if (!marker.itemKey) return;
+
+    const el = marker.getPopup().getElement();
+    const btn = el && el.querySelector(".mkp-bookmark-btn");
+    if (!btn) return;
+
+    const render = () => {
+        const on = bookmarks.has(marker.itemKey);
+        btn.textContent = on ? "★ Saved" : "☆ Save";
+    };
+    render();
+
+    btn.onclick = () => {
+        if (bookmarks.has(marker.itemKey)) bookmarks.delete(marker.itemKey);
+        else bookmarks.add(marker.itemKey);
+        saveBookmarks();
+        marker.setIcon(makePinIcon(getMarkerColor(marker.listing, marker.itemKey), bookmarks.has(marker.itemKey)));
+        render();
+        updateMarkerVisibility(marker); // in case the bookmarks-only filter is active
+    };
 }
 
 
@@ -504,6 +760,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initMap().then(() => {
         setTimeout(() => map.invalidateSize(), 200);
     });
+
+    setupTools();
 });
 
 

@@ -77,6 +77,7 @@ function handleMinimizeMap(minimizedState) {
     const footer = document.getElementById('mkp-mapper-footer')
     const header = document.getElementById('mkp-mapper-header');
     const map = document.getElementById('mkp-mapper-map')
+    const tools = document.getElementById('mkp-mapper-tools')
     const minimized = minimizedState === false || minimizeButton.textContent === '+'
     minimizeButton.textContent = minimized ? '–' : '+'
     const headerHeight = header?.offsetHeight ? `${header?.offsetHeight}px` : null
@@ -86,6 +87,7 @@ function handleMinimizeMap(minimizedState) {
         if (map && footer) {
             footer.style.display = 'block'
             map.style.display = 'block'
+            if (tools) tools.style.display = 'flex'
         }
         parent.postMessage({
             type: "minimize-map",
@@ -98,6 +100,7 @@ function handleMinimizeMap(minimizedState) {
         if (map && footer) {
             footer.style.display = 'none'
             map.style.display = 'none'
+            if (tools) tools.style.display = 'none'
         }
         parent.postMessage({
             type: "minimize-map",

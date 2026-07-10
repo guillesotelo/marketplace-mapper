@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Map",
-    "version": "1.4.19",
-    "description": "Interactive map view for Facebook Marketplace listings.",
+    "version": "1.4.22",
+    "description": "See Facebook Marketplace listings on an interactive map — explore nearby offers, compare prices, fast and privacy-friendly.",
     "permissions": [
         "scripting",
         "activeTab"
