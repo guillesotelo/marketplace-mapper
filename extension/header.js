@@ -80,6 +80,7 @@ function handleMinimizeMap(minimizedState) {
     const tools = document.getElementById('mkp-mapper-tools')
     const minimized = minimizedState === false || minimizeButton.textContent === '+'
     minimizeButton.textContent = minimized ? '–' : '+'
+    minimizeButton.dataset.tooltip = minimized ? 'Minimize' : 'Restore'
     const headerHeight = header?.offsetHeight ? `${header?.offsetHeight}px` : null
 
     if (minimized) {

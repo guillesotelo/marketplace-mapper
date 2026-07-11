@@ -39,7 +39,7 @@ const FREE_WORDS = [
 let bookmarks = loadBookmarks();      // Set of itemKeys
 let filterBookmarksOnly = false;
 let filterFreeOnly = false;
-let colorByFreshness = false;
+let colorByFreshness = true;
 let priceMin = null;
 let priceMax = null;
 
@@ -191,10 +191,10 @@ function setupTools() {
         });
     }
 
-    // Color by freshness (persisted preference)
+    // Color by freshness (persisted preference; on by default)
     const colorBtn = document.getElementById("mkp-tool-color");
     if (colorBtn) {
-        colorByFreshness = localStorage.getItem("mkpm-color-freshness") === "true";
+        colorByFreshness = localStorage.getItem("mkpm-color-freshness") !== "false";
         setBtnActive(colorBtn, colorByFreshness);
         colorBtn.addEventListener("click", () => {
             colorByFreshness = !colorByFreshness;
@@ -235,6 +235,14 @@ function setupTools() {
             });
         }
     }
+}
+
+// -----------------------------
+// Auto-load spinner overlay (driven by content.js sweep status)
+// -----------------------------
+function setAutoloadSpinner(running) {
+    const el = document.getElementById("mkp-autoload-spinner");
+    if (el) el.style.display = running ? "flex" : "none";
 }
 
 // -----------------------------
@@ -770,6 +778,12 @@ document.addEventListener("DOMContentLoaded", () => {
 // -----------------------------
 window.addEventListener("message", (event) => {
     if (event.data.source !== "marketplace-mapper") return;
+
+    // Auto-load sweep progress (no listings in these messages)
+    if (event.data.type === "autoscroll-status") {
+        setAutoloadSpinner(event.data.running);
+        return;
+    }
 
     const itemView = isItemView(event.data);
 

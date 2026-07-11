@@ -52,6 +52,27 @@ function onRouteChange() {
 // -----------------------------
 let autoScrollRunning = false;
 
+function notifyAutoScrollStatus(running) {
+  const iframe = document.getElementById("mkp-mapper-frame");
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.postMessage({
+      source: "marketplace-mapper",
+      type: "autoscroll-status",
+      running
+    }, "*");
+  }
+}
+
+// Wait for lazy-loaded content to extend the page, up to timeoutMs
+async function waitForPageGrowth(prevHeight, timeoutMs = 3000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await new Promise(r => setTimeout(r, 250));
+    if (document.body.scrollHeight > prevHeight + 10) return true;
+  }
+  return false;
+}
+
 async function runAutoScrollSweep() {
   if (autoScrollRunning) return;
   // Skip on item view — auto-scrolling a single listing page is just annoying
@@ -60,19 +81,26 @@ async function runAutoScrollSweep() {
 
   const startY = window.scrollY;
   const step = window.innerHeight * 0.9;
-  const maxSteps = 30;
-  const delayMs = 450;
+  const maxSteps = 45;
+  const settleMs = 400;
 
+  notifyAutoScrollStatus(true);
   try {
     for (let i = 0; i < maxSteps; i++) {
       window.scrollBy(0, step);
-      await new Promise(r => setTimeout(r, delayMs));
-      // Stop early if we've reached the bottom
-      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 5) break;
+      await new Promise(r => setTimeout(r, settleMs));
+
+      // At the loading edge, give Marketplace up to ~3s to append more
+      // listings before concluding we've reached the true end of results.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 5) {
+        const grew = await waitForPageGrowth(document.body.scrollHeight);
+        if (!grew) break;
+      }
     }
   } finally {
     window.scrollTo({ top: startY, behavior: "auto" });
     autoScrollRunning = false;
+    notifyAutoScrollStatus(false);
   }
 }
 
