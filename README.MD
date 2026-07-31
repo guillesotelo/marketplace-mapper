@@ -28,11 +28,30 @@ Automatically extracts location text from listings (e.g., city/neighborhood) and
 **🏷️ Inline Item Details**
 See prices, titles, distances, and thumbnails directly on the map pins.
 
+**✏️ Draw-an-Area Filter**
+Lasso a neighborhood directly on the map and everything outside it drops away — not a radius, the actual shape you'd travel to.
+
+**✨ New Since Your Last Visit**
+The map remembers which listings it has already shown you and flags the rest, so a return visit starts with what changed.
+
+**⬇️ Auto-Load Listings**
+Optionally sweeps the page to pull more listings onto the map, then returns you to where you were. Scroll at any time to stop it.
+
 **🖱️ Drag & Position Anywhere**
 Move the map window freely without interfering with Facebook’s interface.
 
 **⚡ Lightweight & Non-intrusive**
 No account, no backend, no data collection. All processing happens locally in the browser.
+
+## Store assets
+
+`store-assets/` holds the promo tiles and the animated demo. To re-render the demo
+after a UI change:
+
+```bash
+node store-assets/build-demo.js     # composes demo-src.html from promo-src.html
+node store-assets/capture-demo.mjs  # writes demo.gif + demo.mp4 (needs ffmpeg)
+```
 
 ## Local Installation
 

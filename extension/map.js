@@ -39,6 +39,7 @@ const FREE_WORDS = [
 let bookmarks = loadBookmarks();      // Set of itemKeys
 let filterBookmarksOnly = false;
 let filterFreeOnly = false;
+let filterNewOnly = false;
 let colorByFreshness = true;
 let priceMin = null;
 let priceMax = null;
@@ -56,6 +57,89 @@ function loadBookmarks() {
 
 function saveBookmarks() {
     localStorage.setItem("mkpm-bookmarks", JSON.stringify([...bookmarks]));
+}
+
+// -----------------------------
+// Seen-listings history
+//
+// Everything scraped used to die on reload. Remembering which items we've
+// already shown lets the map answer the question that actually brings people
+// back: "what's new since I last looked?"
+// -----------------------------
+const HISTORY_LIMIT = 4000;          // ~a few hundred KB of localStorage
+const SESSION_GAP_MS = 30 * 60 * 1000; // a return after 30min counts as a new visit
+
+let seenHistory = loadHistory();     // itemKey -> firstSeen (epoch ms)
+let previousVisitAt = 0;             // "new" means: first seen after this
+let newSinceLastVisit = new Set();   // itemKeys that are new this visit
+let historyDirty = false;
+
+function loadHistory() {
+    try {
+        const raw = JSON.parse(localStorage.getItem("mkpm-history") || "{}");
+        return new Map(Object.entries(raw));
+    } catch {
+        return new Map();
+    }
+}
+
+function saveHistory() {
+    if (!historyDirty) return;
+    historyDirty = false;
+
+    // Keep the newest entries when we outgrow the cap
+    let entries = [...seenHistory.entries()];
+    if (entries.length > HISTORY_LIMIT) {
+        entries.sort((a, b) => b[1] - a[1]);
+        entries = entries.slice(0, HISTORY_LIMIT);
+        seenHistory = new Map(entries);
+    }
+
+    try {
+        localStorage.setItem("mkpm-history", JSON.stringify(Object.fromEntries(entries)));
+    } catch {
+        // Storage full: drop the oldest half and give up quietly on failure
+        seenHistory = new Map(entries.slice(0, Math.floor(entries.length / 2)));
+        try {
+            localStorage.setItem("mkpm-history", JSON.stringify(Object.fromEntries(seenHistory)));
+        } catch { /* not worth breaking the map over */ }
+    }
+}
+
+// Establish the "since" line for this visit, then start a new one.
+function startVisit() {
+    const now = Date.now();
+    const last = Number(localStorage.getItem("mkpm-last-visit") || 0);
+
+    // Reloading the page mid-browse shouldn't wipe out what was marked new
+    previousVisitAt = (last && now - last < SESSION_GAP_MS)
+        ? Number(localStorage.getItem("mkpm-visit-anchor") || last)
+        : last;
+
+    localStorage.setItem("mkpm-visit-anchor", String(previousVisitAt));
+    localStorage.setItem("mkpm-last-visit", String(now));
+}
+
+// Record an item and report whether it's new since the last visit
+function noteSeen(itemKey) {
+    if (!itemKey) return false;
+
+    if (seenHistory.has(itemKey)) {
+        return newSinceLastVisit.has(itemKey);
+    }
+
+    const now = Date.now();
+    seenHistory.set(itemKey, now);
+    historyDirty = true;
+
+    // Nothing is "new" on a first-ever run — everything would be, which is noise
+    const isNew = previousVisitAt > 0;
+    if (isNew) newSinceLastVisit.add(itemKey);
+    return isNew;
+}
+
+function isNewListing(itemKey) {
+    return !!itemKey && newSinceLastVisit.has(itemKey);
 }
 
 // -----------------------------
@@ -101,10 +185,10 @@ function getMarkerColor(listing, itemKey) {
     return MARKER_COLORS.default;
 }
 
-function makePinIcon(color, starred) {
+function makePinIcon(color, starred, isNew) {
     return L.divIcon({
         className: "mkp-pin-wrap",
-        html: `<div class="mkp-pin" style="background:${color}">${starred ? "★" : ""}</div>`,
+        html: `<div class="mkp-pin${isNew ? " mkp-pin-new" : ""}" style="background:${color}">${starred ? "★" : ""}</div>`,
         iconSize: [18, 18],
         iconAnchor: [9, 9],
         popupAnchor: [0, -10],
@@ -118,6 +202,9 @@ function makePinIcon(color, starred) {
 function passesFilters(listing, itemKey) {
     if (filterBookmarksOnly && !(itemKey && bookmarks.has(itemKey))) return false;
     if (filterFreeOnly && !isFreeListing(listing.price)) return false;
+    if (filterNewOnly && !isNewListing(itemKey)) return false;
+
+    if (areaPolygon && !pointInArea(listing.jLat, listing.jLon)) return false;
 
     if (priceMin != null || priceMax != null) {
         const val = extractPriceValue(listing.price);
@@ -144,7 +231,144 @@ function applyFilters() {
 
 function refreshMarkerStyles() {
     for (const m of markers) {
-        m.setIcon(makePinIcon(getMarkerColor(m.listing, m.itemKey), bookmarks.has(m.itemKey)));
+        m.setIcon(makePinIcon(
+            getMarkerColor(m.listing, m.itemKey),
+            bookmarks.has(m.itemKey),
+            isNewListing(m.itemKey)
+        ));
+    }
+}
+
+// -----------------------------
+// Draw-an-area filter
+//
+// The one thing a map can do that Marketplace's own list view cannot: "only
+// show me things I'd actually be willing to travel to." Freehand lasso, no
+// plugins — Leaflet gives us the container-point → LatLng conversion.
+// -----------------------------
+let areaPolygon = null;      // Leaflet polygon currently filtering the map
+let areaLatLngs = null;      // its raw [lat, lng] ring, for hit-testing
+let areaDrawMode = false;    // waiting for / capturing a drag
+
+// Ray casting against the drawn ring
+function pointInArea(lat, lon) {
+    if (!areaLatLngs || lat == null || lon == null) return true;
+
+    let inside = false;
+    for (let i = 0, j = areaLatLngs.length - 1; i < areaLatLngs.length; j = i++) {
+        const [yi, xi] = areaLatLngs[i];
+        const [yj, xj] = areaLatLngs[j];
+        const intersects = (yi > lat) !== (yj > lat)
+            && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+        if (intersects) inside = !inside;
+    }
+    return inside;
+}
+
+function clearArea() {
+    if (areaPolygon) map.removeLayer(areaPolygon);
+    areaPolygon = null;
+    areaLatLngs = null;
+}
+
+function setAreaDrawMode(on) {
+    areaDrawMode = on;
+    const el = map.getContainer();
+    el.classList.toggle("mkp-drawing", on);
+
+    // The map must stop panning while the pointer is being used to draw
+    if (on) {
+        map.dragging.disable();
+        map.doubleClickZoom.disable();
+    } else {
+        map.dragging.enable();
+        map.doubleClickZoom.enable();
+    }
+}
+
+function setupAreaDrawing() {
+    const el = map.getContainer();
+    let points = [];       // container-space points
+    let preview = null;
+    let drawing = false;
+
+    const toLatLng = (pt) => {
+        const ll = map.containerPointToLatLng(pt);
+        return [ll.lat, ll.lng];
+    };
+
+    const onDown = (e) => {
+        if (!areaDrawMode || e.button !== 0) return;
+        e.preventDefault();
+        drawing = true;
+        points = [];
+        clearArea();
+
+        const rect = el.getBoundingClientRect();
+        points.push([e.clientX - rect.left, e.clientY - rect.top]);
+
+        preview = L.polyline([toLatLng(points[0])], {
+            color: "#354c80", weight: 2, dashArray: "4 4"
+        }).addTo(map);
+
+        el.setPointerCapture?.(e.pointerId);
+    };
+
+    const onMove = (e) => {
+        if (!drawing) return;
+        const rect = el.getBoundingClientRect();
+        const pt = [e.clientX - rect.left, e.clientY - rect.top];
+
+        // Skip micro-movements so the ring stays cheap to hit-test
+        const last = points[points.length - 1];
+        if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < 4) return;
+
+        points.push(pt);
+        preview.addLatLng(toLatLng(pt));
+    };
+
+    const onUp = () => {
+        if (!drawing) return;
+        drawing = false;
+        if (preview) { map.removeLayer(preview); preview = null; }
+
+        // A stray click isn't an area
+        if (points.length < 8) {
+            setAreaDrawMode(false);
+            setBtnActive(document.getElementById("mkp-tool-area"), false);
+            applyFilters();
+            return;
+        }
+
+        areaLatLngs = points.map(toLatLng);
+        areaPolygon = L.polygon(areaLatLngs, {
+            color: "#354c80", weight: 2, fillColor: "#354c80", fillOpacity: .08
+        }).addTo(map);
+
+        setAreaDrawMode(false);
+        applyFilters();
+        updateAreaHint();
+    };
+
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+}
+
+function updateAreaHint() {
+    const hint = document.getElementById("mkp-area-hint");
+    if (!hint) return;
+
+    if (areaDrawMode) {
+        hint.textContent = "Draw an area on the map";
+        hint.style.display = "block";
+    } else if (areaPolygon) {
+        const shown = markers.filter(m => markerLayerGroup.hasLayer(m)).length;
+        hint.textContent = `${shown} listing${shown === 1 ? "" : "s"} in your area — click the area tool to clear`;
+        hint.style.display = "block";
+    } else {
+        hint.style.display = "none";
     }
 }
 
@@ -153,6 +377,52 @@ function refreshMarkerStyles() {
 // -----------------------------
 function setBtnActive(btn, on) {
     if (btn) btn.classList.toggle("active", !!on);
+}
+
+// Tooltips are centered on their button by default, which clips them against
+// the panel edges (the map is only ~420px wide). Re-anchor the ones that would
+// overflow to their left/right edge instead. Pseudo-elements can't be measured
+// directly, so mirror the bubble in an off-screen node to get its real width.
+let ttRuler = null;
+
+function measureTooltip(text) {
+    if (!ttRuler) {
+        ttRuler = document.createElement("div");
+        Object.assign(ttRuler.style, {
+            position: "absolute",
+            top: "-9999px",
+            left: "-9999px",
+            visibility: "hidden",
+            fontSize: ".68rem",
+            lineHeight: "1.3",
+            padding: "4px 8px",
+            width: "max-content",
+            maxWidth: "190px",
+            whiteSpace: "normal"
+        });
+        document.body.appendChild(ttRuler);
+    }
+    ttRuler.textContent = text;
+    return ttRuler.getBoundingClientRect().width;
+}
+
+function anchorTooltips() {
+    const panelWidth = document.documentElement.clientWidth;
+    const MARGIN = 6;
+
+    document.querySelectorAll("[data-tooltip]").forEach(el => {
+        // Elements with an explicit anchor in the markup keep it
+        if (el.dataset.ttFixed === "true") return;
+
+        const rect = el.getBoundingClientRect();
+        if (!rect.width) return;
+
+        const half = measureTooltip(el.dataset.tooltip) / 2;
+        const center = rect.left + rect.width / 2;
+
+        el.classList.toggle("tt-left", center - half < MARGIN);
+        el.classList.toggle("tt-right", center + half > panelWidth - MARGIN);
+    });
 }
 
 function setupTools() {
@@ -178,6 +448,35 @@ function setupTools() {
             filterBookmarksOnly = !filterBookmarksOnly;
             setBtnActive(bmBtn, filterBookmarksOnly);
             applyFilters();
+        });
+    }
+
+    // New since last visit
+    const newBtn = document.getElementById("mkp-tool-new");
+    if (newBtn) {
+        newBtn.addEventListener("click", () => {
+            filterNewOnly = !filterNewOnly;
+            setBtnActive(newBtn, filterNewOnly);
+            applyFilters();
+            updateAreaHint();
+        });
+    }
+
+    // Draw an area to filter by
+    const areaBtn = document.getElementById("mkp-tool-area");
+    if (areaBtn) {
+        areaBtn.addEventListener("click", () => {
+            if (areaPolygon || areaDrawMode) {
+                // Second click clears whatever is active
+                clearArea();
+                setAreaDrawMode(false);
+                setBtnActive(areaBtn, false);
+                applyFilters();
+            } else {
+                setAreaDrawMode(true);
+                setBtnActive(areaBtn, true);
+            }
+            updateAreaHint();
         });
     }
 
@@ -235,14 +534,46 @@ function setupTools() {
             });
         }
     }
+
+    anchorTooltips();
+    window.addEventListener("resize", anchorTooltips);
 }
 
 // -----------------------------
 // Auto-load spinner overlay (driven by content.js sweep status)
 // -----------------------------
-function setAutoloadSpinner(running) {
+// -----------------------------
+// Silent-failure banner
+//
+// Driven by content.js. When scraping stops working the map just goes blank,
+// which reads as "this extension is dead" — say what happened and give people
+// a way to report it instead.
+// -----------------------------
+function setScrapeHealth(status) {
+    const el = document.getElementById("mkp-health");
+    if (!el) return;
+
+    if (!status || status === "ok") {
+        el.style.display = "none";
+        return;
+    }
+
+    const msg = status === "unparsed"
+        ? "Listings are visible but can't be read — Facebook may have changed their layout."
+        : "No listings found on this page. If you can see listings, the extension may need an update.";
+
+    const subject = encodeURIComponent(`Marketplace Map — scraping issue (${status})`);
+    el.innerHTML = `<span>${msg}</span>
+        <a href="mailto:guille.sotelo.cloud@gmail.com?subject=${subject}" target="_blank">Report</a>`;
+    el.style.display = "flex";
+}
+
+function setAutoloadSpinner(running, progress = 0) {
     const el = document.getElementById("mkp-autoload-spinner");
     if (el) el.style.display = running ? "flex" : "none";
+
+    const bar = document.getElementById("mkp-autoload-bar");
+    if (bar) bar.style.width = `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%`;
 }
 
 // -----------------------------
@@ -522,8 +853,10 @@ function parsePrice(price) {
 function addMarkerToMap(listing) {
     if (!listing.jLat || !listing.jLon) return;
     const itemKey = extractMarketplaceItemKey(listing.url);
+    const isNew = noteSeen(itemKey);
     let popupHtml = `
         <div style="display: flex; flex-direction: column; margin: 0 .5rem .5rem;">
+            ${isNew ? `<span class="mkp-new-chip">NEW since your last visit</span>` : ""}
             <p style="margin: 0; font-size: .9rem; font-weight: bold;">${parsePrice(listing.price)}<p>
             <p style="margin: 0;">${listing.title}</p>
             <p style="margin: 0 0 .3rem 0; font-size: .8rem; color: #858585;">${listing.location}</p>
@@ -564,7 +897,7 @@ function addMarkerToMap(listing) {
     `
 
     const marker = L.marker([listing.jLat, listing.jLon], {
-        icon: makePinIcon(getMarkerColor(listing, itemKey), itemKey && bookmarks.has(itemKey))
+        icon: makePinIcon(getMarkerColor(listing, itemKey), itemKey && bookmarks.has(itemKey), isNew)
     })
         .bindPopup(popupHtml)
         .bindTooltip(tooltipHtml);
@@ -600,7 +933,11 @@ function onPopupOpen(e) {
         if (bookmarks.has(marker.itemKey)) bookmarks.delete(marker.itemKey);
         else bookmarks.add(marker.itemKey);
         saveBookmarks();
-        marker.setIcon(makePinIcon(getMarkerColor(marker.listing, marker.itemKey), bookmarks.has(marker.itemKey)));
+        marker.setIcon(makePinIcon(
+            getMarkerColor(marker.listing, marker.itemKey),
+            bookmarks.has(marker.itemKey),
+            isNewListing(marker.itemKey)
+        ));
         render();
         updateMarkerVisibility(marker); // in case the bookmarks-only filter is active
     };
@@ -765,12 +1102,19 @@ document.addEventListener("DOMContentLoaded", () => {
     mapDiv.style.width = "100%";
     mapDiv.style.height = "100%";
 
+    startVisit();
+
     initMap().then(() => {
         setTimeout(() => map.invalidateSize(), 200);
+        setupAreaDrawing();
     });
 
     setupTools();
 });
+
+// History is only worth writing once things settle, not on every scrape tick
+setInterval(saveHistory, 5000);
+window.addEventListener("pagehide", saveHistory);
 
 
 // -----------------------------
@@ -781,7 +1125,13 @@ window.addEventListener("message", (event) => {
 
     // Auto-load sweep progress (no listings in these messages)
     if (event.data.type === "autoscroll-status") {
-        setAutoloadSpinner(event.data.running);
+        setAutoloadSpinner(event.data.running, event.data.progress);
+        return;
+    }
+
+    // Scraper health (no listings in these messages)
+    if (event.data.type === "scrape-health") {
+        setScrapeHealth(event.data.status);
         return;
     }
 
@@ -858,4 +1208,21 @@ window.addEventListener("message", (event) => {
             }
         }
     }
+
+    updateNewBadge();
+    updateAreaHint();
 });
+
+// Show how many new listings this visit turned up, so the feature is visible
+// before anyone thinks to click the filter.
+function updateNewBadge() {
+    const btn = document.getElementById("mkp-tool-new");
+    if (!btn) return;
+
+    const count = markers.filter(m => isNewListing(m.itemKey)).length;
+    btn.dataset.count = count > 99 ? "99+" : String(count);
+    btn.classList.toggle("has-new", count > 0);
+    btn.dataset.tooltip = count > 0
+        ? `${count} new since your last visit — click to show only these`
+        : "Show only listings new since your last visit";
+}

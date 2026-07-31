@@ -4,6 +4,34 @@ let lastCity = null;
 let scheduled = false;
 const iframeHeight = '520px'
 
+// What the results grid told us about each item (key -> { location, price, ... }).
+// Item pages are much harder to read than the cards that link to them, so we
+// keep the card's version around for when the user opens one.
+const itemFactsCache = new Map();
+const ITEM_FACTS_LIMIT = 600;
+
+function itemKeyFromUrl(url) {
+  const m = String(url || "").match(/\/marketplace\/item\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+// Location context handed over by page-context.js, which runs in the MAIN world
+// because __PRELOADED_STATE__ isn't reachable from this isolated one.
+let pageContext = null;
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.data?.source !== "mkpm-page-context") return;
+
+  const ctx = event.data.context;
+  if (ctx && typeof ctx.lat === "number" && typeof ctx.lon === "number") {
+    pageContext = ctx;
+  }
+});
+
+// The bridge may have published before this script was listening
+window.postMessage({ source: "mkpm-page-context-request" }, "*");
+
 function getMarketplaceCity() {
   const el = document.querySelector('#seo_filters span[dir="auto"]');
   if (!el) return null;
@@ -37,8 +65,19 @@ const observer = new MutationObserver(() => {
 observer.observe(document, { subtree: true, childList: true });
 
 function onRouteChange() {
+  // A sweep belongs to the page it started on
+  cancelAutoScrollSweep(false);
+
+  // Health is judged per page
+  healthBadTicks = 0;
+  lastHealthStatus = null;
+
   if (location.pathname.startsWith("/marketplace") && !mapClosed) {
     injectMap();
+    // New results page: sweep it too, that's what "auto" means
+    if (autoScrollEnabled && !location.href.includes('/item/')) {
+      setTimeout(runAutoScrollSweep, 1200);
+    }
   }
 }
 
@@ -51,23 +90,107 @@ function onRouteChange() {
 // restores the original scroll position. Disabled by default.
 // -----------------------------
 let autoScrollRunning = false;
+let autoScrollEnabled = false;   // the UI toggle state
+let autoScrollCancel = null;     // set while a sweep is in flight
 
-function notifyAutoScrollStatus(running) {
+// Hard ceiling on a sweep. The user is stuck watching the page scroll, so it
+// has to end on its own even if Marketplace keeps feeding us more results.
+const SWEEP_MAX_MS = 20000;
+const SWEEP_MAX_STEPS = 40;
+
+function notifyAutoScrollStatus(running, progress = 0) {
   const iframe = document.getElementById("mkp-mapper-frame");
   if (iframe && iframe.contentWindow) {
     iframe.contentWindow.postMessage({
       source: "marketplace-mapper",
       type: "autoscroll-status",
-      running
+      running,
+      progress
     }, "*");
   }
 }
 
+// -----------------------------
+// Silent-failure detector
+//
+// Everything here is scraped from Facebook's markup, so a redesign on their
+// side makes the map quietly go blank — users see an empty map and uninstall
+// without ever reporting it. Watch for "we should be seeing listings but
+// aren't" and surface it in the map instead of failing silently.
+// -----------------------------
+const HEALTH_GRACE_TICKS = 8;   // ~16s at the 2s scrape cadence
+let healthBadTicks = 0;
+let lastHealthStatus = null;
+
+function computeScrapeHealth(listings) {
+  const onResults = location.pathname.startsWith("/marketplace")
+    && !location.href.includes("/item/");
+
+  // Only results pages are expected to show listings
+  if (!onResults) { healthBadTicks = 0; return "ok"; }
+
+  // Page hasn't rendered yet — no verdict either way
+  if ((document.body?.innerText || "").length < 500) { healthBadTicks = 0; return "ok"; }
+
+  const anchors = document.querySelectorAll("a[href*='/marketplace/item/']").length;
+
+  let problem = null;
+  if (anchors === 0) {
+    // Either Facebook changed their markup or this search genuinely has no
+    // results — the banner wording covers both.
+    problem = "no-listings";
+  } else if (listings.length) {
+    // Cards are visible but we can't read them: parsing has drifted
+    const usable = listings.filter(l => l.location && l.price).length;
+    if (usable / listings.length < 0.2) problem = "unparsed";
+  }
+
+  if (!problem) { healthBadTicks = 0; return "ok"; }
+
+  healthBadTicks++;
+  return healthBadTicks >= HEALTH_GRACE_TICKS ? problem : "ok";
+}
+
+function reportScrapeHealth(listings) {
+  const status = computeScrapeHealth(listings);
+  if (status === lastHealthStatus) return;   // only post on change
+  lastHealthStatus = status;
+
+  const iframe = document.getElementById("mkp-mapper-frame");
+  iframe?.contentWindow?.postMessage({
+    source: "marketplace-mapper",
+    type: "scrape-health",
+    status
+  }, "*");
+}
+
+// Stop an in-flight sweep. `restore` returns the page to where the sweep
+// started — we skip it when the user took over scrolling themselves.
+function cancelAutoScrollSweep(restore) {
+  if (autoScrollCancel) autoScrollCancel(restore);
+}
+
+// Interruptible sleep: resolves early (as false) when the sweep is cancelled.
+function sweepSleep(ms, token) {
+  return new Promise(resolve => {
+    if (token.cancelled) return resolve(false);
+    const timer = setTimeout(() => {
+      token.onCancel = null;
+      resolve(!token.cancelled);
+    }, ms);
+    token.onCancel = () => {
+      clearTimeout(timer);
+      token.onCancel = null;
+      resolve(false);
+    };
+  });
+}
+
 // Wait for lazy-loaded content to extend the page, up to timeoutMs
-async function waitForPageGrowth(prevHeight, timeoutMs = 3000) {
+async function waitForPageGrowth(prevHeight, token, timeoutMs = 2500) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    await new Promise(r => setTimeout(r, 250));
+    if (!await sweepSleep(250, token)) return false;
     if (document.body.scrollHeight > prevHeight + 10) return true;
   }
   return false;
@@ -80,27 +203,67 @@ async function runAutoScrollSweep() {
   autoScrollRunning = true;
 
   const startY = window.scrollY;
+  const startedAt = Date.now();
   const step = window.innerHeight * 0.9;
-  const maxSteps = 45;
   const settleMs = 400;
 
-  notifyAutoScrollStatus(true);
-  try {
-    for (let i = 0; i < maxSteps; i++) {
-      window.scrollBy(0, step);
-      await new Promise(r => setTimeout(r, settleMs));
+  const token = { cancelled: false, onCancel: null };
+  let restoreScroll = true;
 
-      // At the loading edge, give Marketplace up to ~3s to append more
-      // listings before concluding we've reached the true end of results.
+  // Any scroll gesture from the user wins: they want to look at something,
+  // not fight the sweep. Leave them where they are and bail out.
+  const onUserScroll = () => cancelAutoScrollSweep(false);
+  const onUserKey = (e) => {
+    if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) {
+      cancelAutoScrollSweep(false);
+    }
+  };
+
+  autoScrollCancel = (restore) => {
+    if (token.cancelled) return;
+    token.cancelled = true;
+    restoreScroll = !!restore;
+    if (token.onCancel) token.onCancel();
+  };
+
+  window.addEventListener("wheel", onUserScroll, { passive: true });
+  window.addEventListener("touchmove", onUserScroll, { passive: true });
+  window.addEventListener("keydown", onUserKey, true);
+
+  notifyAutoScrollStatus(true, 0);
+  try {
+    for (let i = 0; i < SWEEP_MAX_STEPS; i++) {
+      if (token.cancelled) break;
+
+      // Time cap wins over step count — a slow-loading page shouldn't be able
+      // to stretch the sweep out indefinitely.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= SWEEP_MAX_MS) break;
+
+      window.scrollBy(0, step);
+      if (!await sweepSleep(settleMs, token)) break;
+
+      notifyAutoScrollStatus(true, Math.min(
+        1,
+        Math.max((i + 1) / SWEEP_MAX_STEPS, (Date.now() - startedAt) / SWEEP_MAX_MS)
+      ));
+
+      // At the loading edge, give Marketplace a moment to append more listings
+      // before concluding we've reached the true end of results.
       if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 5) {
-        const grew = await waitForPageGrowth(document.body.scrollHeight);
+        const grew = await waitForPageGrowth(document.body.scrollHeight, token);
         if (!grew) break;
       }
     }
   } finally {
-    window.scrollTo({ top: startY, behavior: "auto" });
+    window.removeEventListener("wheel", onUserScroll);
+    window.removeEventListener("touchmove", onUserScroll);
+    window.removeEventListener("keydown", onUserKey, true);
+
+    if (restoreScroll) window.scrollTo({ top: startY, behavior: "auto" });
+    autoScrollCancel = null;
     autoScrollRunning = false;
-    notifyAutoScrollStatus(false);
+    notifyAutoScrollStatus(false, 0);
   }
 }
 
@@ -212,7 +375,9 @@ function injectMap() {
 
       else if (event.data.type === "toggle-autoscroll") {
         // Feature-flagged: only sweeps when the UI toggle is enabled
-        if (event.data.enabled) runAutoScrollSweep();
+        autoScrollEnabled = !!event.data.enabled;
+        if (autoScrollEnabled) runAutoScrollSweep();
+        else cancelAutoScrollSweep(true);
       }
     });
 
@@ -382,6 +547,16 @@ function injectMap() {
       const location = getLocationFromAriaLabel(ariaLabel) || parsedLocation;
       const title = parsedTitle || getTitleFromAriaLabel(ariaLabel);
 
+      // Remember what the grid told us about this item. When the user opens it,
+      // the item page's own DOM is far harder to read than the card was.
+      const key = itemKeyFromUrl(a.href);
+      if (key && (location || price)) {
+        if (itemFactsCache.size >= ITEM_FACTS_LIMIT && !itemFactsCache.has(key)) {
+          itemFactsCache.delete(itemFactsCache.keys().next().value); // oldest out
+        }
+        itemFactsCache.set(key, { location, price, title, image });
+      }
+
       return {
         title,
         location,
@@ -394,10 +569,158 @@ function injectMap() {
   }
 
   // -----------------------------
+  // Item view scraping
+  //
+  // The old approach indexed blindly into the DOM (img[1], spans[2], spans[9]),
+  // which breaks silently whenever Facebook reshuffles its markup. Each field
+  // now tries meaning-based strategies first and only falls back to the old
+  // positional lookup, so a layout change degrades instead of going blank.
+  // -----------------------------
+
+  // Elements holding their own text, in document order
+  function leafTextNodes(root = document.body) {
+    const out = [];
+    if (!root) return out;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(el) {
+        if (!el.childElementCount) {
+          const t = (el.textContent || "").trim();
+          if (t && t.length <= 120) return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_SKIP;
+      }
+    });
+    let n;
+    while ((n = walker.nextNode())) out.push(n);
+    return out;
+  }
+
+  function metaContent(prop) {
+    const el = document.querySelector(`meta[property="${prop}"], meta[name="${prop}"]`);
+    return el?.getAttribute("content")?.trim() || null;
+  }
+
+  function getItemTitle() {
+    const h1 = document.querySelector("h1")?.textContent?.trim();
+    if (h1) return h1;
+
+    // Marketplace item pages are server-rendered with OG tags
+    const og = metaContent("og:title");
+    if (og) return og.replace(/\s*[|·-]\s*Facebook.*$/i, "").trim();
+
+    return null;
+  }
+
+  // Returns { price, index } — index is where in `leaves` it was found, which
+  // tells getItemLocation where to start looking.
+  function getItemPrice(leaves) {
+    // Strategy 1: the first price-looking leaf at or after the title
+    const h1 = document.querySelector("h1");
+    if (h1) {
+      const start = leaves.findIndex(el => h1.contains(el) || el === h1);
+      const from = start === -1 ? 0 : start;
+      for (let i = from; i < Math.min(leaves.length, from + 60); i++) {
+        const t = (leaves[i].textContent || "").trim();
+        if (t.length <= 40 && isPrice(t)) return { price: t, index: i };
+      }
+    }
+
+    // Strategy 2: anywhere on the page, shortest price-looking string wins
+    let best = null;
+    leaves.forEach((el, i) => {
+      const t = (el.textContent || "").trim();
+      if (t.length <= 40 && isPrice(t) && (!best || t.length < best.price.length)) {
+        best = { price: t, index: i };
+      }
+    });
+    if (best) return best;
+
+    // Strategy 3 (legacy): positional lookup
+    const spans = Array.from(document.querySelectorAll('div[aria-hidden=false]'));
+    return { price: spans[2] ? spans[2].textContent : null, index: -1 };
+  }
+
+  function getItemImage() {
+    const og = metaContent("og:image");
+    if (og) return og;
+
+    // Largest rendered Facebook-CDN image on the page
+    let best = null;
+    let bestArea = 0;
+    for (const img of document.querySelectorAll("img")) {
+      const src = img.currentSrc || img.src || "";
+      if (!/fbcdn|scontent/.test(src)) continue;
+      const area = img.naturalWidth * img.naturalHeight || img.clientWidth * img.clientHeight;
+      if (area > bestArea) { bestArea = area; best = src; }
+    }
+    if (best) return best;
+
+    // Legacy positional fallback
+    return Array.from(document.querySelectorAll('img'))[1]?.src || null;
+  }
+
+  function getItemLocation(leaves, { title, priceIndex }) {
+    // Strategy 1: reuse what the results grid already told us about this item.
+    // Language-independent and immune to item-page layout changes.
+    const cached = itemFactsCache.get(itemKeyFromUrl(location.href));
+    if (cached?.location) return cached.location;
+
+    // Strategy 2: an explicitly labelled location region
+    const labelled = document.querySelector(
+      'div[aria-label*="ocation" i], a[href*="/marketplace/"][aria-label*="ocation" i]'
+    );
+    const labelledText = labelled?.textContent?.trim();
+    if (labelledText && labelledText.length <= 60) return labelledText;
+
+    // Strategy 3: a "City, Region" shaped leaf. Only look after the price —
+    // before it sits the title, which has exactly the same shape.
+    const shaped = /^[\p{Lu}\p{Lo}][\p{L}.'’\-]*(?:[ \-][\p{L}.'’\-]+){0,3}(?:,\s*[\p{L}][\p{L}.'’ \-]{1,30})?$/u;
+    const h1 = document.querySelector("h1");
+    const from = priceIndex >= 0 ? priceIndex + 1 : 0;
+
+    for (let i = from; i < leaves.length; i++) {
+      const el = leaves[i];
+      const t = (el.textContent || "").trim();
+
+      if (t.length < 2 || t.length > 45) continue;
+      if (/\d/.test(t) || isPrice(t)) continue;
+      if (title && t === title.trim()) continue;      // never the title
+      if (h1 && (h1.contains(el) || el === h1)) continue;
+      if (!shaped.test(t)) continue;
+      // Skip obvious UI chrome
+      if (/^(save|share|send|message|seller|details|marketplace|buy|sell)$/i.test(t)) continue;
+
+      return t;
+    }
+
+    // Strategy 4 (legacy): positional lookup
+    const spans = Array.from(document.querySelectorAll('div[aria-hidden=false]'));
+    return spans[9] ? spans[9].querySelector('span')?.textContent : null;
+  }
+
+  function scrapeItemView() {
+    const leaves = leafTextNodes();
+    const title = getItemTitle();
+    const { price, index: priceIndex } = getItemPrice(leaves);
+
+    return {
+      title,
+      price,
+      image: getItemImage(),
+      location: getItemLocation(leaves, { title, priceIndex })
+    };
+  }
+
+  // -----------------------------
   // Get user current Marketplace location
   // -----------------------------
   function getMarketplaceLocation() {
     let context = { lat: null, lon: null, country: null, admin1: null };
+
+    // Preferred source: the MAIN-world bridge. Reading the page state directly
+    // from here never works (isolated world), so the block below is only a
+    // fallback for the case where the bridge script didn't run.
+    if (pageContext) return { ...pageContext };
 
     try {
       const state = window.__PRELOADED_STATE__ || {};
@@ -415,13 +738,24 @@ function injectMap() {
       const loc = candidates.find(l => l && (l.latitude || l.lat));
 
       if (loc) {
-        context.lat = loc.latitude ?? loc.lat ?? null;
-        context.lon = loc.longitude ?? loc.lon ?? loc.lng ?? null;
+        const lat = loc.latitude ?? loc.lat ?? null;
+        const lon = loc.longitude ?? loc.lon ?? loc.lng ?? null;
 
-        const rg = loc.reverse_geocode || loc.reverseGeocode || loc.geocode;
-        if (rg) {
-          context.country = rg.country || rg.countryCode || null;
-          context.admin1 = rg.state || rg.province || rg.region || null;
+        // Only accept real coordinates — a bad pair would drag the map's
+        // initial view somewhere nonsensical
+        const usable = typeof lat === "number" && typeof lon === "number"
+          && Number.isFinite(lat) && Number.isFinite(lon)
+          && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+
+        if (usable) {
+          context.lat = lat;
+          context.lon = lon;
+
+          const rg = loc.reverse_geocode || loc.reverseGeocode || loc.geocode;
+          if (rg) {
+            context.country = rg.country || rg.countryCode || null;
+            context.admin1 = rg.state || rg.province || rg.region || null;
+          }
         }
       }
     } catch (e) { console.warn("Marketplace location detection failed", e); }
@@ -431,19 +765,18 @@ function injectMap() {
 
 
   itemScraped = false
-  // Send listings to iframe every 2s
-  setInterval(() => {
+  // Send listings to iframe every 2s.
+  // injectMap() runs again on every route change, so drop the previous timer
+  // instead of stacking a new scraper on top of it.
+  if (window.__mkpScrapeTimer) clearInterval(window.__mkpScrapeTimer);
+  window.__mkpScrapeTimer = setInterval(() => {
 
     // scrape all listings
     let listings = getListings();
 
     // scrape listing if standing on item view
     if (location.href.includes('/item/')) {
-      const image = Array.from(document.querySelectorAll('img'))[1]?.src
-      const spans = Array.from(document.querySelectorAll('div[aria-hidden=false]'))
-      const price = spans[2] ? spans[2].textContent : null
-      const itemLocation = spans[9] ? spans[9].querySelector('span')?.textContent : null
-      const title = document.querySelector('h1')?.textContent
+      const { title, price, image, location: itemLocation } = scrapeItemView()
 
       if (image && price && itemLocation && title) {
         itemScraped = true
@@ -457,6 +790,8 @@ function injectMap() {
         })
       }
     }
+
+    reportScrapeHealth(listings);
 
     const iframe = document.getElementById("mkp-mapper-frame");
     if (iframe && iframe.contentWindow) {

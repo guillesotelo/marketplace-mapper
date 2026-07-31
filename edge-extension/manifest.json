@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Marketplace Map",
-    "version": "1.4.23",
+    "version": "1.5.0",
     "description": "See Facebook Marketplace listings on an interactive map — explore nearby offers, compare prices, fast and privacy-friendly.",
     "permissions": [
         "scripting",
@@ -18,6 +18,16 @@
             "js": [
                 "content.js"
             ]
+        },
+        {
+            "matches": [
+                "*://*.facebook.com/*"
+            ],
+            "js": [
+                "page-context.js"
+            ],
+            "world": "MAIN",
+            "run_at": "document_start"
         }
     ],
     "web_accessible_resources": [
