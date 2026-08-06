@@ -95,7 +95,7 @@ let autoScrollCancel = null;     // set while a sweep is in flight
 
 // Hard ceiling on a sweep. The user is stuck watching the page scroll, so it
 // has to end on its own even if Marketplace keeps feeding us more results.
-const SWEEP_MAX_MS = 20000;
+const SWEEP_MAX_MS = 5000;
 const SWEEP_MAX_STEPS = 40;
 
 function notifyAutoScrollStatus(running, progress = 0) {
