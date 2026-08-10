@@ -640,20 +640,54 @@ function injectMap() {
     return { price: spans[2] ? spans[2].textContent : null, index: -1 };
   }
 
+  // Rank a candidate photo by how much room it takes up on screen, or reject it.
+  // Intrinsic size is the wrong measure: sidebar ad creatives are often larger
+  // files than the listing photo while being rendered as small thumbnails.
+  function scoreItemImage(img) {
+    const src = img.currentSrc || img.src || "";
+    if (!/fbcdn|scontent/.test(src)) return null;
+
+    // Ads link off Facebook; the listing photo does not
+    const link = img.closest("a");
+    const href = link?.getAttribute("href") || "";
+    if (/^https?:\/\//.test(href) && !/(^|\.)facebook\.com/.test(new URL(href, location.href).hostname)) {
+      return null;
+    }
+
+    const rect = img.getBoundingClientRect();
+    // Too small to be the main photo — avatars, ad thumbnails, icons
+    if (rect.width < 140 || rect.height < 140) return null;
+    if (rect.width * rect.height < 40000) return null;
+
+    return { src, area: rect.width * rect.height };
+  }
+
+  function largestItemImage(nodes) {
+    return [...nodes]
+      .map(scoreItemImage)
+      .filter(Boolean)
+      .sort((a, b) => b.area - a.area)[0]?.src || null;
+  }
+
   function getItemImage() {
+    // Strategy 1: the photo from the card we already scraped in the grid.
+    // Exact by construction, and immune to whatever the item page looks like.
+    const cached = itemFactsCache.get(itemKeyFromUrl(location.href));
+    if (cached?.image) return cached.image;
+
+    // Strategy 2: Facebook's own marker for primary media
+    const marked = largestItemImage(document.querySelectorAll('img[data-visualcompletion="media-vc-image"]'));
+    if (marked) return marked;
+
+    // Strategy 3: the biggest thing actually rendered on the page
+    const biggest = largestItemImage(document.querySelectorAll("img"));
+    if (biggest) return biggest;
+
+    // Strategy 4: og:image. Deliberately low priority — Marketplace is a single
+    // page app, so after in-app navigation these tags still describe whichever
+    // page was loaded first, which is how sidebar ads ended up on the map.
     const og = metaContent("og:image");
     if (og) return og;
-
-    // Largest rendered Facebook-CDN image on the page
-    let best = null;
-    let bestArea = 0;
-    for (const img of document.querySelectorAll("img")) {
-      const src = img.currentSrc || img.src || "";
-      if (!/fbcdn|scontent/.test(src)) continue;
-      const area = img.naturalWidth * img.naturalHeight || img.clientWidth * img.clientHeight;
-      if (area > bestArea) { bestArea = area; best = src; }
-    }
-    if (best) return best;
 
     // Legacy positional fallback
     return Array.from(document.querySelectorAll('img'))[1]?.src || null;
