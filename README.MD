@@ -43,6 +43,30 @@ Move the map window freely without interfering with Facebook’s interface.
 **⚡ Lightweight & Non-intrusive**
 No account, no backend, no data collection. All processing happens locally in the browser.
 
+## Tests
+
+Regression suites that drive the real extension files in a real Chromium — no
+mocks of our own code, because most bugs here come from browser behaviour
+(isolated worlds, Leaflet transforms, SPA-stale meta tags) that a fake DOM would
+happily report as working.
+
+```bash
+cd tests
+npm install          # playwright-core
+npm test             # all suites
+node geo.test.mjs    # or just one
+```
+
+Needs a Chromium: one from a `playwright install`, or `CHROME_PATH=/path/to/chrome`.
+
+| suite | covers |
+| --- | --- |
+| `geo.test.mjs` | which country a search resolves to, across 6 regions, plus the manual region override |
+| `scrape.test.mjs` | grid + item scraping, a simulated Facebook redesign, silent-failure detection |
+| `image.test.mjs` | picking the listing photo rather than a sidebar ad |
+| `map.test.mjs` | new-since-last-visit, the area lasso, the health banner, tooltip fit |
+| `autoload.test.mjs` | the sweep stops on demand, on user scroll, and always by itself |
+
 ## Store assets
 
 `store-assets/` holds the promo tiles and the animated demo. To re-render the demo

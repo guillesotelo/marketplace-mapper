@@ -14,7 +14,100 @@ let jitterCache = new Map();   // url -> { jLat, jLon }
 let searchContext = null;
 let contextSamples = [];
 let lastIncomingContext = null;
-const CONTEXT_SAMPLE_LIMIT = 7;
+
+// Listings sampled before guessing a region. Counted in listings, not in
+// candidate cities — see collectContextSample.
+const CONTEXT_SAMPLE_LIMIT = 10;
+
+// A region the user pinned by hand. Overrides every other signal, which is the
+// only reliable answer for places whose city names collide with somewhere else
+// in the world (Quebec vs France being the reported case).
+let homeContext = loadHomeContext();
+
+function loadHomeContext() {
+    try {
+        const raw = JSON.parse(localStorage.getItem("mkpm-home") || "null");
+        return raw && typeof raw.lat === "number" ? raw : null;
+    } catch {
+        return null;
+    }
+}
+
+function saveHomeContext(ctx) {
+    homeContext = ctx;
+    if (ctx) localStorage.setItem("mkpm-home", JSON.stringify(ctx));
+    else localStorage.removeItem("mkpm-home");
+}
+
+// Resolve free text like "Montreal, QC" / "Austin, TX" / "Malmo, Skane"
+// against the city database.
+function resolveHomeText(text) {
+    if (!cityIndex || !text) return null;
+
+    const parts = text.split(",").map(p => p.trim()).filter(Boolean);
+    const candidates = cityIndex.get(normalize(parts[0]));
+    if (!candidates || !candidates.length) return null;
+
+    const hint = parts[1] || null;
+    let best = candidates[0];
+
+    if (hint) {
+        const nHint = normalizeAdmin(hint);
+        const scored = candidates.map(c => {
+            let s = 0;
+            if (adminCodeMatches(c, nHint) === true) s += 100;
+            if (normalizeAdmin(c.admin1_name) === nHint) s += 100;
+            if (String(c.country).toLowerCase() === nHint) s += 80;
+            return { c, s };
+        }).sort((a, b) => b.s - a.s);
+
+        if (scored[0].s > 0) best = scored[0].c;
+    }
+
+    return {
+        country: best.country,
+        admin1: best.admin1_name,
+        lat: best.lat,
+        lon: best.lon,
+        label: `${best.name}, ${best.admin1_name || ""} ${best.country}`.replace(/\s+/g, " ").trim()
+    };
+}
+
+// Re-place listings that were geocoded before we knew the region.
+//
+// The first listings arrive before enough samples exist to infer a country, so
+// they get placed with no context at all — a name like "Toronto" or "Paris"
+// then lands on whichever namesake the database happened to list first, and it
+// stayed there forever. Once the region is known, move them.
+function regeocodeExisting(ctx) {
+    if (!ctx) return;
+
+    for (const l of globalListings) {
+        const place = geocodeOffline(l.location || "", ctx);
+        if (!place) continue;
+
+        const [jLat, jLon] = jitter(place.lat, place.lon, 2000);
+        jitterCache.set(l.url, { jLat, jLon });
+        l.jLat = jLat;
+        l.jLon = jLon;
+
+        if (l._marker) l._marker.setLatLng([jLat, jLon]);
+    }
+
+    // The view was centred on one of those mis-placed pins
+    if (ctx.lat && ctx.lon) map.setView([ctx.lat, ctx.lon], 11);
+}
+
+// Everything already on the map was placed using the old context, so start over
+function resetGeocoding() {
+    searchContext = null;
+    contextSamples = [];
+    addedItems.clear();
+    globalListings = [];
+    jitterCache.clear();
+    clearMapMarkers();
+    initialLocationSet = null;
+}
 
 let lastOpenedItemKey = null;
 
@@ -512,7 +605,9 @@ function setupTools() {
 
     if (priceBtn && pricePanel && minInput && maxInput) {
         priceBtn.addEventListener("click", () => {
-            pricePanel.style.display = pricePanel.style.display === "block" ? "none" : "block";
+            const on = pricePanel.style.display !== "block";
+            pricePanel.style.display = on ? "block" : "none";
+            priceBtn.toggleAttribute("data-tt-off", on);
         });
 
         const onPrice = () => {
@@ -531,8 +626,67 @@ function setupTools() {
                 maxInput.value = "";
                 onPrice();
                 pricePanel.style.display = "none";
+                priceBtn.removeAttribute("data-tt-off");
             });
         }
+    }
+
+    // Home region popover
+    const homeBtn = document.getElementById("mkp-tool-home");
+    const homePanel = document.getElementById("mkp-home-panel");
+    const homeInput = document.getElementById("mkp-home-input");
+    const homeApply = document.getElementById("mkp-home-apply");
+    const homeClear = document.getElementById("mkp-home-clear");
+    const homeStatus = document.getElementById("mkp-home-status");
+
+    if (homeBtn && homePanel && homeInput) {
+        const renderHome = () => {
+            setBtnActive(homeBtn, !!homeContext);
+            if (homeStatus) {
+                homeStatus.textContent = homeContext
+                    ? `Using ${homeContext.label || homeContext.admin1 || homeContext.country}`
+                    : "Auto-detected from listings";
+            }
+        };
+        renderHome();
+
+        const showHomePanel = (on) => {
+            homePanel.style.display = on ? "block" : "none";
+            homeBtn.toggleAttribute("data-tt-off", on);
+            if (on) homeInput.focus();
+        };
+
+        homeBtn.addEventListener("click", () => {
+            showHomePanel(homePanel.style.display !== "block");
+        });
+
+        const apply = () => {
+            const text = homeInput.value.trim();
+            if (!text) return;
+
+            const resolved = resolveHomeText(text);
+            if (!resolved) {
+                if (homeStatus) homeStatus.textContent = `Couldn't find "${text}"`;
+                return;
+            }
+
+            saveHomeContext(resolved);
+            renderHome();
+            resetGeocoding();
+            map.setView([resolved.lat, resolved.lon], 11);
+            showHomePanel(false);
+        };
+
+        homeApply?.addEventListener("click", apply);
+        homeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
+
+        homeClear?.addEventListener("click", () => {
+            saveHomeContext(null);
+            homeInput.value = "";
+            renderHome();
+            resetGeocoding();
+            showHomePanel(false);
+        });
     }
 
     anchorTooltips();
@@ -691,12 +845,67 @@ function normalize(text) {
 // -----------------------------
 // Offline geocode
 // -----------------------------
+// normalize() strips the standalone words "en", "in" and "on" so that phrases
+// like "near X" reduce cleanly — but those are also the postal codes for
+// Ontario and Indiana, which normalize() therefore erased entirely. Region
+// codes get their own normalizer with the stop-word pass left out.
+function normalizeAdmin(text) {
+    if (!text) return "";
+    return text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/[–—]/g, "-")
+        .replace(/[^a-z0-9 ,.-]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+// Subdivision codes Facebook writes that are not a prefix of the region's name.
+// Without these, "Montreal, QC" scored every Quebec candidate -200 (because
+// "quebec" does not start with "qc") and the correct city lost to a namesake.
+const ADMIN_CODE_NAMES = {
+    // Canada
+    AB: "alberta", BC: "british columbia", MB: "manitoba", NB: "new brunswick",
+    NL: "newfoundland and labrador", NS: "nova scotia", NT: "northwest territories",
+    NU: "nunavut", ON: "ontario", PE: "prince edward island", QC: "quebec",
+    SK: "saskatchewan", YT: "yukon",
+    // US states whose postal code doesn't prefix the name
+    AK: "alaska", AZ: "arizona", CT: "connecticut", HI: "hawaii", MA: "massachusetts",
+    MD: "maryland", ME: "maine", MI: "michigan", MN: "minnesota", MO: "missouri",
+    MS: "mississippi", MT: "montana", NC: "north carolina", NH: "new hampshire",
+    NJ: "new jersey", NM: "new mexico", NY: "new york", PR: "puerto rico",
+    RI: "rhode island", SC: "south carolina", SD: "south dakota", TN: "tennessee",
+    TX: "texas", VT: "vermont", WV: "west virginia"
+};
+
+// true = the candidate is in that subdivision, false = it definitely isn't,
+// null = we can't interpret the code, so stay neutral rather than guess.
+// Neutral matters: many countries use codes we don't know ("Malmö, M"), and the
+// old code punished every candidate equally, which just threw the signal away.
+function adminCodeMatches(candidate, listingAdmin) {
+    if (!listingAdmin) return null;
+
+    const code = listingAdmin.toUpperCase();
+    const cAdmin = normalizeAdmin(candidate.admin1_name);
+
+    const known = ADMIN_CODE_NAMES[code];
+    if (known) return cAdmin === known;
+
+    // GeoNames stores US-style codes directly in admin1
+    if (candidate.admin1 && String(candidate.admin1).toUpperCase() === code) return true;
+
+    if (cAdmin && cAdmin.startsWith(listingAdmin)) return true;
+
+    return null;
+}
+
 function geocodeOffline(text, context = null) {
     if (!cityIndex || !text) return null;
 
     const parts = text.split(",").map(x => x.trim());
     const cityPart = normalize(parts[0]);
-    const adminPart = parts[1] ? normalize(parts[1]) : null;
+    const adminPart = parts[1] ? normalizeAdmin(parts[1]) : null;
 
     const candidates = cityIndex.get(cityPart);
     if (!candidates || !candidates.length) return null;
@@ -715,27 +924,24 @@ function geocodeOffline(text, context = null) {
         /* ----------------------------------
          Explicit listing admin (strongest)
         ---------------------------------- */
-        if (listingAdmin) {
-            if (cAdmin.startsWith(listingAdmin)) {
-                score += 300;
-            } else {
-                score -= 200;
-            }
-        }
+        const adminVerdict = adminCodeMatches(c, listingAdmin);
+        if (adminVerdict === true) score += 300;
+        else if (adminVerdict === false) score -= 200;
 
         /* ----------------------------------
          Search intent (soft lock / context)
-           Only if listing did NOT specify admin
-        ---------------------------------- */
-        if (!listingAdmin) {
-            if (lockedAdmin1) {
-                if (cAdmin === lockedAdmin1) score += 120;
-                else score -= 40;
-            }
 
-            if (ctxAdmin && cAdmin === ctxAdmin) {
-                score += 100;
-            }
+         Applied even when the listing names an admin: an unreadable code
+         leaves every candidate tied, and the context is then the only thing
+         that can break the tie correctly.
+        ---------------------------------- */
+        if (lockedAdmin1) {
+            if (cAdmin === lockedAdmin1) score += 120;
+            else score -= 40;
+        }
+
+        if (ctxAdmin && cAdmin === ctxAdmin) {
+            score += 100;
         }
 
         /* ----------------------------------
@@ -904,6 +1110,7 @@ function addMarkerToMap(listing) {
 
     marker.listing = listing;
     marker.itemKey = itemKey;
+    listing._marker = marker;   // so a later region fix can move it
     marker.on("popupopen", onPopupOpen);
 
     markers.push(marker);
@@ -947,43 +1154,73 @@ function onPopupOpen(e) {
 // -----------------------------
 // Helper for collecting candidate cities per listing
 // -----------------------------
+// One entry per listing, holding that listing's candidate cities.
+//
+// This used to spread every candidate into a flat array, so a single listing in
+// a city with many same-named twins (Montreal has 11) blew past the sample
+// limit on its own — the whole session's country was then decided by one
+// listing's name collisions.
 function collectContextSample(locationText) {
     if (!locationText) return;
 
     const cityKey = normalize(locationText.split(",")[0]);
     const candidates = cityIndex.get(cityKey);
-    if (!candidates) return;
+    if (!candidates || !candidates.length) return;
 
-    contextSamples.push(...candidates);
+    contextSamples.push(candidates);
 }
 
 
 // -----------------------------
 // Infer the most likely context for init location
 // -----------------------------
-function inferContext(candidates) {
-    const countryCount = new Map();
-    const adminCount = new Map();
+// Pick the country/region that best explains the whole batch of listings.
+//
+// Each listing votes at most once per country, so a place name with seven
+// same-named twins abroad can't outvote seven listings that all agree. Quebec
+// was the case that exposed this: French-Canadian city names (Laval, Verdun,
+// Montréal, Mirabel…) each match several French communes, so counting raw
+// candidates concluded "France" and plotted the map in Occitanie.
+function inferContext(groups) {
+    const countryListings = new Map();  // country -> listings it can explain
+    const adminListings = new Map();    // "country|admin1" -> same
 
-    for (const c of candidates) {
-        countryCount.set(c.country, (countryCount.get(c.country) || 0) + 1);
-        if (c.admin1_name) {
-            const key = `${c.country}|${c.admin1_name}`;
-            adminCount.set(key, (adminCount.get(key) || 0) + 1);
+    for (const candidates of groups) {
+        const countries = new Set();
+        const admins = new Set();
+
+        for (const c of candidates) {
+            countries.add(c.country);
+            if (c.admin1_name) admins.add(`${c.country}|${c.admin1_name}`);
         }
+
+        for (const k of countries) countryListings.set(k, (countryListings.get(k) || 0) + 1);
+        for (const k of admins) adminListings.set(k, (adminListings.get(k) || 0) + 1);
     }
 
-    const bestCountry = [...countryCount.entries()]
-        .sort((a, b) => b[1] - a[1])[0]?.[0];
+    const bestAdminFor = (country) =>
+        [...adminListings.entries()]
+            .filter(([k]) => k.startsWith(country + "|"))
+            .sort((a, b) => b[1] - a[1])[0];
 
-    const bestAdmin = [...adminCount.entries()]
-        .filter(([k]) => k.startsWith(bestCountry + "|"))
-        .sort((a, b) => b[1] - a[1])[0];
+    // Rank by how many listings a country explains, then by how tightly those
+    // listings concentrate into one region — a real search sits in one area.
+    const bestCountry = [...countryListings.entries()]
+        .sort((a, b) => {
+            if (b[1] !== a[1]) return b[1] - a[1];
+            return (bestAdminFor(b[0])?.[1] || 0) - (bestAdminFor(a[0])?.[1] || 0);
+        })[0]?.[0];
 
-    const filtered = candidates.filter(c =>
+    if (!bestCountry) return null;
+
+    const bestAdmin = bestAdminFor(bestCountry);
+
+    const filtered = groups.flat().filter(c =>
         c.country === bestCountry &&
         (!bestAdmin || `${c.country}|${c.admin1_name}` === bestAdmin[0])
     );
+
+    if (!filtered.length) return null;
 
     // centroid
     const lat = filtered.reduce((s, c) => s + c.lat, 0) / filtered.length;
@@ -993,7 +1230,8 @@ function inferContext(candidates) {
         country: bestCountry,
         admin1: bestAdmin ? bestAdmin[0].split("|")[1] : null,
         lat,
-        lon
+        lon,
+        inferred: true   // a guess, not something the user or the page told us
     };
 }
 
@@ -1057,22 +1295,29 @@ function mergeListings(newListings, incomingContext) {
         addedItems.add(l.image);
 
         // Collect context samples
-        if (!searchContext && !isStrongContext(incomingContext)) {
+        if (!homeContext && !searchContext && !isStrongContext(incomingContext)) {
             collectContextSample(l.location);
             if (contextSamples.length >= CONTEXT_SAMPLE_LIMIT) {
                 searchContext = inferContext(contextSamples);
                 contextSamples.length = 0;
+                regeocodeExisting(searchContext);
             }
         }
 
-        const contextToUse = isStrongContext(incomingContext) ? incomingContext : searchContext;
+        // A region the user set by hand always wins
+        const contextToUse = homeContext
+            || (isStrongContext(incomingContext) ? incomingContext : searchContext);
+
         const place = geocodeOffline(l.location || "", contextToUse);
 
         if (!place) continue; // skip if geocoding failed
 
-        // Country lock: skip listings outside inferred country
-        if (contextToUse?.country && place.country !== contextToUse.country) {
-            // console.log("Skipping listing outside country:", l.location, place.country);
+        // Country lock — only when we actually know where the user is. When the
+        // country was merely inferred from place names, a wrong guess used to
+        // delete every listing that disagreed with it, so a Quebec search lost
+        // the cities that have no European namesake and kept the ones that do.
+        const authoritative = contextToUse && !contextToUse.inferred;
+        if (authoritative && contextToUse.country && place.country !== contextToUse.country) {
             continue;
         }
 

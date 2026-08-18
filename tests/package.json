@@ -1,0 +1,12 @@
+{
+  "name": "marketplace-map-tests",
+  "private": true,
+  "type": "module",
+  "description": "Regression suites for the Marketplace Map extension",
+  "scripts": {
+    "test": "node run-all.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

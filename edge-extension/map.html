@@ -126,6 +126,11 @@
             visibility: visible;
         }
 
+        /* While a button's popover is open its tooltip would sit on top of it */
+        [data-tt-off]::after {
+            display: none;
+        }
+
         .tt-up::after {
             bottom: calc(100% + 7px);
         }
@@ -430,6 +435,65 @@
             font-size: .7rem;
         }
 
+        /* Home region popover */
+        #mkp-home-panel {
+            display: none;
+            position: absolute;
+            bottom: 40px;
+            right: 6px;
+            width: 210px;
+            background: #fff;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+            padding: 10px;
+            z-index: 1200;
+            font-size: .75rem;
+        }
+
+        #mkp-home-panel .mkp-home-title {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        #mkp-home-panel input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 5px 6px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: .75rem;
+        }
+
+        #mkp-home-panel .mkp-home-row {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        #mkp-home-panel button {
+            background: #354c80;
+            color: #fff;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: .7rem;
+        }
+
+        #mkp-home-panel #mkp-home-clear {
+            background: #e6e8ee;
+            color: #354c80;
+        }
+
+        #mkp-home-status {
+            display: block;
+            margin-top: 7px;
+            color: #6a7799;
+            font-size: .66rem;
+            line-height: 1.3;
+        }
+
         /* Colored map pins */
         .mkp-pin-wrap {
             background: transparent;
@@ -554,6 +618,24 @@
                     d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
             </svg>
         </button>
+
+        <button class="mkp-tool-btn tt-up" id="mkp-tool-home"
+            data-tooltip="Set your region — fixes listings placed in the wrong country">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" />
+            </svg>
+        </button>
+
+        <div id="mkp-home-panel">
+            <div class="mkp-home-title">Your region</div>
+            <input type="text" id="mkp-home-input" placeholder="e.g. Montreal, QC" autocomplete="off">
+            <div class="mkp-home-row">
+                <button id="mkp-home-apply" type="button">Save</button>
+                <button id="mkp-home-clear" type="button">Auto</button>
+            </div>
+            <span id="mkp-home-status"></span>
+        </div>
 
         <div id="mkp-price-panel">
             <div class="mkp-price-title">Price range</div>
