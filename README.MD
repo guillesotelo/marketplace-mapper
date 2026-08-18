@@ -67,6 +67,28 @@ Needs a Chromium: one from a `playwright install`, or `CHROME_PATH=/path/to/chro
 | `map.test.mjs` | new-since-last-visit, the area lasso, the health banner, tooltip fit |
 | `autoload.test.mjs` | the sweep stops on demand, on user scroll, and always by itself |
 
+## City database
+
+`extension/data/cities_db.json.gz` is a GeoNames `cities500` extract: 225k
+populated places with names, aliases, coordinates, region, county and
+population. Rows are keyed by GeoNames id.
+
+To add the population / county fields to an existing database (joins on that id,
+so existing names and coordinates are left untouched):
+
+```bash
+curl -O https://download.geonames.org/export/dump/admin2Codes.txt   # into db/
+python3 extension/utils/enrich_cities.py \
+    extension/data/cities_db.json.gz db/cities500.txt db/admin2Codes.txt /tmp/cities.json
+node -e "const fs=require('fs'),z=require('zlib');\
+  fs.writeFileSync('extension/data/cities_db.json.gz', z.gzipSync(fs.readFileSync('/tmp/cities.json'),{level:9}))"
+cp extension/data/cities_db.json.gz edge-extension/data/
+```
+
+`population` breaks ties between same-named places; `admin2_name` lets counties
+("Norfolk", "Kent") resolve even when the village inside them is not in the
+database.
+
 ## Store assets
 
 `store-assets/` holds the promo tiles and the animated demo. To re-render the demo

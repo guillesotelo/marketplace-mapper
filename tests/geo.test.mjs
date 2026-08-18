@@ -106,6 +106,75 @@ console.log("\n=== Manual region override ===");
   await page.close();
 }
 
+console.log("\n=== Region text the resolver has to cope with ===");
+{
+  const page = await openMap(browser);
+
+  // "New York, Norfolk, United Kingdom" was reported as resolving to nothing:
+  // that hamlet isn't in the database and neither is Norfolk as a UK place, so
+  // the country is the only usable signal in the string.
+  const cases = [
+    // The hamlet isn't in the database, but the county is — so this resolves
+    // to Norfolk rather than falling all the way back to "United Kingdom"
+    ["New York, Norfolk, United Kingdom", "GB", false],
+    ["Norfolk, United Kingdom", "GB", false],
+    ["Kent, England", "GB", false],
+    ["United Kingdom", "GB", true],
+    ["Canada", "CA", true],
+    ["London, England", "GB", false],
+    ["Norwich, England", "GB", false],
+    ["Montreal, QC", "CA", false],
+    ["Austin, TX", "US", false],
+    ["Malmo, Skane", "SE", false],
+  ];
+
+  for (const [text, country, coarse] of cases) {
+    const r = await page.evaluate(t => {
+      const x = resolveHomeText(t);
+      return x && { country: x.country, coarse: !!x.coarse, label: x.label };
+    }, text);
+    check(`"${text}" -> ${country}`, r?.country === country, JSON.stringify(r));
+    if (coarse) check(`"${text}" falls back to country level`, r?.coarse === true);
+  }
+
+  check("nonsense still reports not found",
+    await page.evaluate(() => resolveHomeText("qwertyville") === null));
+
+  // Counties come from the admin2 data added to the database
+  const norfolk = await page.evaluate(() => resolveHomeText("New York, Norfolk, United Kingdom"));
+  check("resolves the county, not just the country", norfolk?.admin2 === "Norfolk", JSON.stringify(norfolk?.label));
+  check("and lands in East Anglia",
+    Math.abs(norfolk.lat - 52.7) < 1 && Math.abs(norfolk.lon - 1.1) < 1,
+    `${norfolk?.lat?.toFixed(2)}, ${norfolk?.lon?.toFixed(2)}`);
+
+  // Population breaks ties between namesakes that nothing else can separate
+  const prominence = await page.evaluate(() => ({
+    montreal: geocodeOffline("Montreal", null),
+    laval: geocodeOffline("Laval", null),
+    london: geocodeOffline("London", null),
+  }));
+  check("bare 'Montreal' picks the big one", prominence.montreal?.country === "CA",
+    `${prominence.montreal?.name} ${prominence.montreal?.country} pop=${prominence.montreal?.population}`);
+  check("bare 'London' picks the big one", prominence.london?.country === "GB",
+    `${prominence.london?.name} ${prominence.london?.country} pop=${prominence.london?.population}`);
+  check("every candidate now carries a population",
+    await page.evaluate(() => cityList.filter(c => typeof c.population !== "number").length === 0));
+
+  // A country-only region must still steer the geocoder
+  await page.evaluate(() => {
+    saveHomeContext(resolveHomeText("United Kingdom"));
+    resetGeocoding();
+  });
+  await sendListings(page, listingsFrom(["Norwich", "Cambridge", "Bristol", "York", "Reading"]));
+  await page.waitForTimeout(1500);
+  const { pins } = await readPins(page);
+  const inUk = pins.filter(p => p.lat > 49 && p.lat < 61 && p.lon > -9 && p.lon < 2);
+  check("country-only region places listings in the UK",
+    pins.length > 0 && inUk.length === pins.length, `${inUk.length}/${pins.length}`);
+
+  await page.close();
+}
+
 console.log("\n=== Late region fix ===");
 {
   // Listings that arrive before the region is known must be moved once it is,

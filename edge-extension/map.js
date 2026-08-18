@@ -3,6 +3,7 @@ let markerLayerGroup = null;
 let markers = [];
 let markerByItemKey = new Map(); // itemKey -> marker
 let cityIndex = null;
+let cityList = null;   // raw rows, for country/region centroids
 let lockedAdmin1 = null; // soft lock for inferring listings within the same admin1 first
 
 let addedItems = new Set();         // Image URLs of markers already added
@@ -39,38 +40,212 @@ function saveHomeContext(ctx) {
     else localStorage.removeItem("mkpm-home");
 }
 
-// Resolve free text like "Montreal, QC" / "Austin, TX" / "Malmo, Skane"
-// against the city database.
+// Country names people actually type, mapped to the ISO codes the database
+// uses. Without this, "New York, Norfolk, United Kingdom" had nothing to match:
+// that hamlet isn't in the database, and neither is Norfolk as a UK place, so
+// the only usable signal in the string was the country.
+const COUNTRY_NAMES = {
+    "united kingdom": "GB", uk: "GB", "great britain": "GB", britain: "GB",
+    england: "GB", scotland: "GB", wales: "GB", "northern ireland": "GB",
+    "united states": "US", "united states of america": "US", usa: "US", america: "US",
+    canada: "CA", australia: "AU", "new zealand": "NZ", ireland: "IE",
+    france: "FR", germany: "DE", deutschland: "DE", spain: "ES", espana: "ES",
+    italy: "IT", italia: "IT", portugal: "PT", netherlands: "NL", holland: "NL",
+    belgium: "BE", luxembourg: "LU", switzerland: "CH", austria: "AT",
+    denmark: "DK", danmark: "DK", sweden: "SE", sverige: "SE", norway: "NO",
+    norge: "NO", finland: "FI", suomi: "FI", iceland: "IS",
+    poland: "PL", polska: "PL", "czech republic": "CZ", czechia: "CZ",
+    slovakia: "SK", hungary: "HU", romania: "RO", bulgaria: "BG", greece: "GR",
+    croatia: "HR", slovenia: "SI", serbia: "RS", ukraine: "UA", estonia: "EE",
+    latvia: "LV", lithuania: "LT",
+    mexico: "MX", brazil: "BR", brasil: "BR", argentina: "AR", chile: "CL",
+    colombia: "CO", peru: "PE", uruguay: "UY", paraguay: "PY", ecuador: "EC",
+    "costa rica": "CR", panama: "PA", guatemala: "GT",
+    india: "IN", pakistan: "PK", bangladesh: "BD", "sri lanka": "LK",
+    philippines: "PH", indonesia: "ID", malaysia: "MY", singapore: "SG",
+    thailand: "TH", vietnam: "VN", japan: "JP", "south korea": "KR",
+    "south africa": "ZA", nigeria: "NG", kenya: "KE", ghana: "GH", egypt: "EG",
+    morocco: "MA", turkey: "TR", turkiye: "TR", israel: "IL",
+    "united arab emirates": "AE", uae: "AE", "saudi arabia": "SA", qatar: "QA"
+};
+
+// The UK's four nations are admin1 values in the database, so a country name
+// can also pin the region
+const SUBNATION_ADMIN = {
+    england: "England", scotland: "Scotland",
+    wales: "Wales", "northern ireland": "Northern Ireland"
+};
+
+// Friendliest name we know for a code, for display only ("GB" -> "United Kingdom").
+// Longest matching name wins so we show the full name rather than an alias.
+function countryLabel(code) {
+    let best = null;
+    for (const [name, cc] of Object.entries(COUNTRY_NAMES)) {
+        if (cc !== code) continue;
+        if (SUBNATION_ADMIN[name]) continue;        // "England" is not the country
+        if (!best || name.length > best.length) best = name;
+    }
+    if (!best) return code;
+    return best.replace(/\b[a-z]/g, ch => ch.toUpperCase());
+}
+
+function countryFromText(text) {
+    const n = normalizeAdmin(text);
+    if (!n) return null;
+    if (COUNTRY_NAMES[n]) return COUNTRY_NAMES[n];
+    if (/^[a-z]{2}$/.test(n)) return n.toUpperCase();   // already an ISO code
+    return null;
+}
+
+// Does this candidate satisfy any of the hints the user typed after the city?
+function scoreAgainstHints(candidate, hints) {
+    let score = 0;
+    for (const hint of hints) {
+        const n = normalizeAdmin(hint);
+        if (!n) continue;
+        if (adminCodeMatches(candidate, n) === true) score += 100;
+        if (normalizeAdmin(candidate.admin1_name) === n) score += 100;
+        if (countryFromText(hint) === candidate.country) score += 80;
+    }
+    return score;
+}
+
+function regionCentroid(rows) {
+    if (!rows || !rows.length) return null;
+    return {
+        lat: rows.reduce((s, c) => s + c.lat, 0) / rows.length,
+        lon: rows.reduce((s, c) => s + c.lon, 0) / rows.length
+    };
+}
+
+function countryRows(country, admin1) {
+    if (!cityList) return [];
+    return cityList.filter(c =>
+        c.country === country && (!admin1 || c.admin1_name === admin1));
+}
+
+// Counties / districts, e.g. "Norfolk" in the UK. These are not cities, so the
+// city index can't find them — but they are the level people naturally type,
+// and small villages inside them (the reported "New York, Norfolk") are often
+// absent from the database entirely.
+function findAdmin2(text, wantCountry) {
+    if (!cityList) return null;
+
+    const target = normalizeAdmin(text);
+    if (!target || target.length < 3) return null;
+
+    const rows = cityList.filter(c =>
+        c.admin2_name &&
+        (!wantCountry || c.country === wantCountry) &&
+        normalizeAdmin(c.admin2_name) === target);
+
+    if (!rows.length) return null;
+
+    // Several countries can share a county name; the biggest match wins
+    const byCountry = new Map();
+    for (const r of rows) {
+        const k = `${r.country}|${r.admin1_name}`;
+        if (!byCountry.has(k)) byCountry.set(k, []);
+        byCountry.get(k).push(r);
+    }
+
+    const [, best] = [...byCountry.entries()]
+        .sort((a, b) => {
+            const pop = (g) => g.reduce((s, c) => s + (c.population || 0), 0);
+            return pop(b[1]) - pop(a[1]);
+        })[0];
+
+    return best;
+}
+
+// Resolve free text: "Montreal, QC" / "Austin, TX" / "London, England" /
+// "New York, Norfolk, United Kingdom" / "Canada".
 function resolveHomeText(text) {
     if (!cityIndex || !text) return null;
 
     const parts = text.split(",").map(p => p.trim()).filter(Boolean);
-    const candidates = cityIndex.get(normalize(parts[0]));
-    if (!candidates || !candidates.length) return null;
+    if (!parts.length) return null;
 
-    const hint = parts[1] || null;
-    let best = candidates[0];
-
-    if (hint) {
-        const nHint = normalizeAdmin(hint);
-        const scored = candidates.map(c => {
-            let s = 0;
-            if (adminCodeMatches(c, nHint) === true) s += 100;
-            if (normalizeAdmin(c.admin1_name) === nHint) s += 100;
-            if (String(c.country).toLowerCase() === nHint) s += 80;
-            return { c, s };
-        }).sort((a, b) => b.s - a.s);
-
-        if (scored[0].s > 0) best = scored[0].c;
+    // A named country is a hard filter, not a tie-breaker. Otherwise
+    // "New York, Norfolk, United Kingdom" happily resolves to Norfolk, New York.
+    let wantCountry = null;
+    for (const p of parts) {
+        const cc = countryFromText(p);
+        if (cc && (!cityList || cityList.some(c => c.country === cc))) { wantCountry = cc; break; }
     }
 
-    return {
-        country: best.country,
-        admin1: best.admin1_name,
-        lat: best.lat,
-        lon: best.lon,
-        label: `${best.name}, ${best.admin1_name || ""} ${best.country}`.replace(/\s+/g, " ").trim()
-    };
+    // Try each part as the city name, using the others as hints
+    for (let i = 0; i < parts.length; i++) {
+        let candidates = cityIndex.get(normalize(parts[i]));
+        if (!candidates || !candidates.length) continue;
+
+        if (wantCountry) candidates = candidates.filter(c => c.country === wantCountry);
+        if (!candidates.length) continue;
+
+        const hints = parts.filter((_, j) => j !== i);
+        const scored = candidates
+            .map(c => ({ c, s: scoreAgainstHints(c, hints) }))
+            .sort((a, b) => b.s - a.s);
+
+        // With hints given and none satisfied, this part isn't the city they meant
+        if (hints.length && !wantCountry && scored[0].s <= 0) continue;
+
+        const best = scored[0].c;
+        return {
+            country: best.country,
+            admin1: best.admin1_name,
+            lat: best.lat,
+            lon: best.lon,
+            viewLat: best.lat,
+            viewLon: best.lon,
+            label: `${best.name}, ${best.admin1_name || ""} ${best.country}`.replace(/\s+/g, " ").trim()
+        };
+    }
+
+    // No city matched — try a county / district before giving up on precision
+    for (const part of parts) {
+        const rows = findAdmin2(part, wantCountry);
+        if (!rows) continue;
+
+        const centre = regionCentroid(rows);
+        const sample = rows[0];
+        return {
+            country: sample.country,
+            admin1: sample.admin1_name,
+            admin2: sample.admin2_name,
+            lat: centre.lat,
+            lon: centre.lon,
+            viewLat: centre.lat,
+            viewLon: centre.lon,
+            label: `${sample.admin2_name}, ${sample.admin1_name || ""} ${sample.country}`
+                .replace(/\s+/g, " ").trim()
+        };
+    }
+
+    // Fall back to the country (and nation, when given). Coarse on purpose:
+    // lat/lon stay null so geocodeOffline applies the country bonus without a
+    // distance penalty measured from a meaningless centroid.
+    if (wantCountry) {
+        let nation = null;
+        for (const p of parts) {
+            const sub = SUBNATION_ADMIN[normalizeAdmin(p)];
+            if (sub) { nation = sub; break; }
+        }
+
+        const centre = regionCentroid(countryRows(wantCountry, nation));
+        return {
+            country: wantCountry,
+            admin1: nation,
+            lat: null,
+            lon: null,
+            viewLat: centre?.lat ?? null,
+            viewLon: centre?.lon ?? null,
+            coarse: true,
+            label: nation ? `${nation}, ${countryLabel(wantCountry)}` : countryLabel(wantCountry)
+        };
+    }
+
+    return null;
 }
 
 // Re-place listings that were geocoded before we knew the region.
@@ -673,7 +848,11 @@ function setupTools() {
             saveHomeContext(resolved);
             renderHome();
             resetGeocoding();
-            map.setView([resolved.lat, resolved.lon], 11);
+
+            // A country-level pick centres on a whole nation, so zoom out for it
+            if (resolved.viewLat != null && resolved.viewLon != null) {
+                map.setView([resolved.viewLat, resolved.viewLon], resolved.coarse ? 5 : 11);
+            }
             showHomePanel(false);
         };
 
@@ -810,6 +989,7 @@ async function loadCityDB() {
     }
 
     cityIndex = new Map();
+    cityList = arr;
 
     for (const city of arr) {
         const allNames = [city.name, ...(city.aliases || [])];
@@ -895,6 +1075,11 @@ function adminCodeMatches(candidate, listingAdmin) {
     // GeoNames stores US-style codes directly in admin1
     if (candidate.admin1 && String(candidate.admin1).toUpperCase() === code) return true;
 
+    // Counties / districts, e.g. "Norwich, Norfolk". Only ever a positive
+    // signal — a mismatch here says nothing, since most listings name a region
+    // rather than a county.
+    if (candidate.admin2_name && normalizeAdmin(candidate.admin2_name) === listingAdmin) return true;
+
     if (cAdmin && cAdmin.startsWith(listingAdmin)) return true;
 
     return null;
@@ -951,6 +1136,17 @@ function geocodeOffline(text, context = null) {
             normalize(c.country) === normalize(context.country)) {
             score += 60;
         }
+
+        /* ----------------------------------
+           Prominence
+
+           Deliberately small: at most ~24 points for a ten-million city versus
+           ~9 for a village, so it separates otherwise-tied namesakes without
+           ever outweighing an explicit region (300) or the country (60).
+           Before this the winner among tied candidates was simply whichever
+           one the database happened to list first.
+        ---------------------------------- */
+        if (c.population > 0) score += Math.log10(c.population + 1) * 3;
 
         /* ----------------------------------
             Distance (weakest signal)
