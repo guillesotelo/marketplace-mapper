@@ -175,6 +175,74 @@ console.log("\n=== Region text the resolver has to cope with ===");
   await page.close();
 }
 
+console.log("\n=== Region readings ===");
+{
+  const page = await openMap(browser);
+  // Each of these has burned us or is one comma away from doing so
+  const CASES = [
+    ["Palermo, New York",     "US", "New York"],       // town absent from the DB
+    ["Palermo, Italy",        "IT", "Sicily"],
+    ["Palermo",               "IT", "Sicily"],
+    ["Los Angeles, CA",       "US", "California"],     // CA is also Canada
+    ["Wilmington, DE",        "US", "Delaware"],       // DE is also Germany
+    ["London, ON",            "CA", "Ontario"],
+    ["London, England",       "GB", "England"],
+    ["Springfield, Illinois", "US", "Illinois"],
+    ["Brooklyn, New York",    "US", "New York"],
+    ["Toronto, Ontario",      "CA", "Ontario"],
+    ["Montreal, QC",          "CA", "Quebec"],
+    ["Montreal, Quebec",      "CA", "Quebec"],
+    ["Austin, TX",            "US", "Texas"],
+    ["Malmo, Skane",          "SE", "Skåne"],
+    ["Malmo, M",              "SE", "Skåne"],          // M is also Munster, IE
+    ["Canada",                "CA", null],             // must not match "La Cañada"
+    ["United Kingdom",        "GB", null],
+  ];
+
+  for (const [text, country, admin1] of CASES) {
+    const r = await page.evaluate(t => {
+      const x = resolveHomeText(t);
+      return x && { country: x.country, admin1: x.admin1, label: x.label };
+    }, text);
+    const ok = r?.country === country && (admin1 === null || r?.admin1 === admin1);
+    check(`"${text}" -> ${country}${admin1 ? "/" + admin1 : ""}`, ok, JSON.stringify(r?.label));
+  }
+
+  check("nonsense is still reported as not found",
+    await page.evaluate(() => resolveHomeText("qwertyville, nowhere") === null));
+
+  await page.close();
+}
+
+console.log("\n=== An empty map explains itself ===");
+{
+  const page = await openMap(browser);
+
+  // Pin a region that cannot match these listings, the way a mistyped or
+  // unresolvable place would
+  await page.evaluate(() => { saveHomeContext(resolveHomeText("Palermo, Italy")); resetGeocoding(); });
+  await sendListings(page, listingsFrom(["Austin, TX", "Houston, TX", "Dallas, TX"]));
+  await page.waitForTimeout(1500);
+
+  const pins = await page.evaluate(() => markers.length);
+  check("mismatched region does empty the map", pins === 0, `${pins} pins`);
+  check("but the map says why", await page.evaluate(() =>
+    getComputedStyle(document.getElementById("mkp-region-warn")).display !== "none"));
+  check("and names the region", await page.evaluate(() =>
+    /Palermo/.test(document.getElementById("mkp-region-warn").textContent)));
+
+  await page.click("#mkp-region-reset");
+  await page.waitForTimeout(300);
+  check("one click clears the region", await page.evaluate(() => homeContext === null));
+
+  await sendListings(page, listingsFrom(["Austin, TX", "Houston, TX", "Dallas, TX"]));
+  await page.waitForTimeout(1500);
+  const after = await page.evaluate(() => markers.length);
+  check("listings come back afterwards", after === 3, `${after} pins`);
+
+  await page.close();
+}
+
 console.log("\n=== Late region fix ===");
 {
   // Listings that arrive before the region is known must be moved once it is,

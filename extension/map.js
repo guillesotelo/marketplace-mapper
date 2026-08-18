@@ -158,94 +158,230 @@ function findAdmin2(text, wantCountry) {
     return best;
 }
 
-// Resolve free text: "Montreal, QC" / "Austin, TX" / "London, England" /
+// Region lookup indexes, built once on first use (a 225k scan is fine for a
+// one-off user action, and most sessions never open this panel).
+let regionIndex = null;
+
+function buildRegionIndex() {
+    if (regionIndex || !cityList) return regionIndex;
+
+    const admin1ByName = new Map();   // "new york" -> [rows]
+    const admin2ByName = new Map();   // "norfolk"  -> [rows]
+    const countries = new Set();
+
+    for (const c of cityList) {
+        countries.add(c.country);
+        if (c.admin1_name) {
+            const k = normalizeAdmin(c.admin1_name);
+            if (!admin1ByName.has(k)) admin1ByName.set(k, []);
+            admin1ByName.get(k).push(c);
+        }
+        if (c.admin2_name) {
+            const k = normalizeAdmin(c.admin2_name);
+            if (!admin2ByName.has(k)) admin2ByName.set(k, []);
+            admin2ByName.get(k).push(c);
+        }
+    }
+
+    regionIndex = { admin1ByName, admin2ByName, countries };
+    return regionIndex;
+}
+
+const totalPopulation = (rows) => rows.reduce((s, c) => s + (c.population || 0), 0);
+
+// Every region one piece of text could mean, most specific last. Ambiguity is
+// real and unavoidable — "CA" is both Canada and California, "DE" is both
+// Germany and Delaware — so we return all readings and let the rest of the
+// query decide which one the user meant.
+function scopeReadings(text) {
+    const idx = buildRegionIndex();
+    if (!idx) return [];
+
+    const n = normalizeAdmin(text);
+    if (!n) return [];
+
+    const out = [];
+    const push = (rows, extra) => { if (rows && rows.length) out.push({ rows, ...extra }); };
+
+    // Country by name ("United Kingdom", "England")
+    const named = COUNTRY_NAMES[n];
+    if (named && idx.countries.has(named)) {
+        const nation = SUBNATION_ADMIN[n] || null;
+        push(countryRows(named, nation), { country: named, admin1: nation, coarse: !nation });
+    }
+
+    // Country by ISO code
+    if (/^[a-z]{2}$/.test(n) && idx.countries.has(n.toUpperCase())) {
+        const cc = n.toUpperCase();
+        if (cc !== named) push(countryRows(cc, null), { country: cc, admin1: null, coarse: true });
+    }
+
+    // Region by postal/ISO code ("QC", "TX", and Sweden's single-letter "M").
+    //
+    // A code is only trustworthy on its own when we recognise it exactly. The
+    // fuzzy "name starts with the code" reading matches dozens of regions
+    // worldwide ("M" hits Maharashtra, Michigan, Madrid...), so it is marked
+    // loose: usable to confirm a city found inside it, never an answer by itself.
+    if (/^[a-z0-9]{1,3}$/.test(n)) {
+        const byCode = new Map();
+        for (const c of cityList) {
+            if (adminCodeMatches(c, n) !== true) continue;
+            const exact = !!ADMIN_CODE_NAMES[n.toUpperCase()] ||
+                (c.admin1 && String(c.admin1).toUpperCase() === n.toUpperCase());
+            const k = `${c.country}|${c.admin1_name}`;
+            if (!byCode.has(k)) byCode.set(k, { rows: [], exact });
+            byCode.get(k).rows.push(c);
+        }
+        for (const [k, { rows, exact }] of byCode) {
+            const [country, admin1] = k.split("|");
+            push(rows, { country, admin1, loose: !exact, fromCode: true });
+        }
+    }
+
+    // Region by name ("New York", "Skåne")
+    for (const rows of groupBy(idx.admin1ByName.get(n) || [], c => `${c.country}|${c.admin1_name}`)) {
+        push(rows, { country: rows[0].country, admin1: rows[0].admin1_name });
+    }
+
+    // County / district by name ("Norfolk", "Kent")
+    for (const rows of groupBy(idx.admin2ByName.get(n) || [], c => `${c.country}|${c.admin1_name}|${c.admin2_name}`)) {
+        push(rows, { country: rows[0].country, admin1: rows[0].admin1_name, admin2: rows[0].admin2_name });
+    }
+
+    return out;
+}
+
+function groupBy(rows, keyOf) {
+    const m = new Map();
+    for (const r of rows) {
+        const k = keyOf(r);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(r);
+    }
+    return [...m.values()];
+}
+
+const inScope = (c, scope) =>
+    (!scope.country || c.country === scope.country) &&
+    (!scope.admin1 || c.admin1_name === scope.admin1) &&
+    (!scope.admin2 || c.admin2_name === scope.admin2);
+
+function placeResult(c) {
+    return {
+        country: c.country,
+        admin1: c.admin1_name,
+        admin2: c.admin2_name || null,
+        lat: c.lat, lon: c.lon,
+        viewLat: c.lat, viewLon: c.lon,
+        label: `${c.name}, ${c.admin1_name || ""} ${c.country}`.replace(/\s+/g, " ").trim()
+    };
+}
+
+function scopeResult(scope) {
+    const centre = regionCentroid(scope.rows);
+    if (!centre) return null;
+
+    const label = scope.admin2 || scope.admin1
+        ? `${scope.admin2 || scope.admin1}, ${countryLabel(scope.country)}`
+        : countryLabel(scope.country);
+
+    return {
+        country: scope.country,
+        admin1: scope.admin1 || null,
+        admin2: scope.admin2 || null,
+        // A whole country is too coarse to measure distance from; a region isn't
+        lat: scope.coarse ? null : centre.lat,
+        lon: scope.coarse ? null : centre.lon,
+        viewLat: centre.lat,
+        viewLon: centre.lon,
+        coarse: !!scope.coarse,
+        label
+    };
+}
+
+// Resolve free text: "Montreal, QC" / "Palermo, New York" / "London, England" /
 // "New York, Norfolk, United Kingdom" / "Canada".
+//
+// Addresses run specific-to-general, so the later parts set the scope and the
+// earlier ones narrow inside it. Doing it this way rather than "first part that
+// looks like a city wins" is what keeps "Palermo, New York" out of Sicily.
 function resolveHomeText(text) {
     if (!cityIndex || !text) return null;
 
     const parts = text.split(",").map(p => p.trim()).filter(Boolean);
     if (!parts.length) return null;
 
-    // A named country is a hard filter, not a tie-breaker. Otherwise
-    // "New York, Norfolk, United Kingdom" happily resolves to Norfolk, New York.
-    let wantCountry = null;
-    for (const p of parts) {
-        const cc = countryFromText(p);
-        if (cc && (!cityList || cityList.some(c => c.country === cc))) { wantCountry = cc; break; }
-    }
+    const results = [];
 
-    // Try each part as the city name, using the others as hints
-    for (let i = 0; i < parts.length; i++) {
-        let candidates = cityIndex.get(normalize(parts[i]));
-        if (!candidates || !candidates.length) continue;
+    // Try every part (broadest first) as the scope
+    for (let i = parts.length - 1; i >= (parts.length > 1 ? 1 : 0); i--) {
+        for (const scope of scopeReadings(parts[i])) {
+            const narrowing = parts.slice(0, i);
 
-        if (wantCountry) candidates = candidates.filter(c => c.country === wantCountry);
-        if (!candidates.length) continue;
+            // Narrow by the earlier parts, most specific first
+            for (const term of narrowing) {
+                const cities = (cityIndex.get(normalize(term)) || []).filter(c => inScope(c, scope));
+                if (cities.length) {
+                    const best = cities.sort((a, b) => (b.population || 0) - (a.population || 0))[0];
+                    results.push({ rank: 3, pop: best.population || 0, out: placeResult(best) });
+                    continue;
+                }
 
-        const hints = parts.filter((_, j) => j !== i);
-        const scored = candidates
-            .map(c => ({ c, s: scoreAgainstHints(c, hints) }))
-            .sort((a, b) => b.s - a.s);
+                const counties = groupBy(
+                    (buildRegionIndex()?.admin2ByName.get(normalizeAdmin(term)) || []).filter(c => inScope(c, scope)),
+                    c => `${c.country}|${c.admin1_name}|${c.admin2_name}`);
 
-        // With hints given and none satisfied, this part isn't the city they meant
-        if (hints.length && !wantCountry && scored[0].s <= 0) continue;
+                if (counties.length) {
+                    const rows = counties.sort((a, b) => totalPopulation(b) - totalPopulation(a))[0];
+                    results.push({
+                        rank: 2, pop: totalPopulation(rows),
+                        out: scopeResult({
+                            rows, country: rows[0].country,
+                            admin1: rows[0].admin1_name, admin2: rows[0].admin2_name
+                        })
+                    });
+                }
+            }
 
-        const best = scored[0].c;
-        return {
-            country: best.country,
-            admin1: best.admin1_name,
-            lat: best.lat,
-            lon: best.lon,
-            viewLat: best.lat,
-            viewLon: best.lon,
-            label: `${best.name}, ${best.admin1_name || ""} ${best.country}`.replace(/\s+/g, " ").trim()
-        };
-    }
-
-    // No city matched — try a county / district before giving up on precision
-    for (const part of parts) {
-        const rows = findAdmin2(part, wantCountry);
-        if (!rows) continue;
-
-        const centre = regionCentroid(rows);
-        const sample = rows[0];
-        return {
-            country: sample.country,
-            admin1: sample.admin1_name,
-            admin2: sample.admin2_name,
-            lat: centre.lat,
-            lon: centre.lon,
-            viewLat: centre.lat,
-            viewLon: centre.lon,
-            label: `${sample.admin2_name}, ${sample.admin1_name || ""} ${sample.country}`
-                .replace(/\s+/g, " ").trim()
-        };
-    }
-
-    // Fall back to the country (and nation, when given). Coarse on purpose:
-    // lat/lon stay null so geocodeOffline applies the country bonus without a
-    // distance penalty measured from a meaningless centroid.
-    if (wantCountry) {
-        let nation = null;
-        for (const p of parts) {
-            const sub = SUBNATION_ADMIN[normalizeAdmin(p)];
-            if (sub) { nation = sub; break; }
+            // The scope on its own is an answer only if we actually recognised it.
+            // A named region ("New York") outranks reading the first part as a
+            // city; a bare code does not — "Malmo, M" means Malmö qualified by a
+            // region code, not Munster, Ireland, whose code happens to be M.
+            if (scope.loose) continue;
+            const bare = scopeResult(scope);
+            if (bare) results.push({ rank: scope.fromCode ? 0.5 : 1.5, pop: totalPopulation(scope.rows), out: bare });
         }
-
-        const centre = regionCentroid(countryRows(wantCountry, nation));
-        return {
-            country: wantCountry,
-            admin1: nation,
-            lat: null,
-            lon: null,
-            viewLat: centre?.lat ?? null,
-            viewLon: centre?.lon ?? null,
-            coarse: true,
-            label: nation ? `${nation}, ${countryLabel(wantCountry)}` : countryLabel(wantCountry)
-        };
     }
 
-    return null;
+    // A single bare word: treat it as a place name — unless it names a country,
+    // in which case the country wins ("Canada" must not resolve to La Cañada)
+    if (parts.length === 1 && !COUNTRY_NAMES[normalizeAdmin(parts[0])]) {
+        const cities = cityIndex.get(normalize(parts[0])) || [];
+        if (cities.length) {
+            const best = [...cities].sort((a, b) => (b.population || 0) - (a.population || 0))[0];
+            results.push({ rank: 3, pop: best.population || 0, out: placeResult(best) });
+        }
+    }
+
+    // The first part read as a place name, with the rest as soft hints. Ranks
+    // below a named region but above a bare code, so it rescues inputs whose
+    // region code we cannot place, such as Sweden's "Malmo, M".
+    if (parts.length > 1) {
+        const cities = cityIndex.get(normalize(parts[0])) || [];
+        if (cities.length) {
+            const hints = parts.slice(1);
+            const best = [...cities].sort((a, b) =>
+                (scoreAgainstHints(b, hints) - scoreAgainstHints(a, hints)) ||
+                ((b.population || 0) - (a.population || 0)))[0];
+            results.push({ rank: 1, pop: best.population || 0, out: placeResult(best) });
+        }
+    }
+
+    if (!results.length) return null;
+
+    // Prefer the most specific reading; break ties on prominence
+    results.sort((a, b) => (b.rank - a.rank) || (b.pop - a.pop));
+    return results[0].out;
 }
 
 // Re-place listings that were geocoded before we knew the region.
@@ -276,6 +412,7 @@ function regeocodeExisting(ctx) {
 // Everything already on the map was placed using the old context, so start over
 function resetGeocoding() {
     searchContext = null;
+    droppedByRegion = 0;
     contextSamples = [];
     addedItems.clear();
     globalListings = [];
@@ -901,6 +1038,39 @@ function setScrapeHealth(status) {
     el.style.display = "flex";
 }
 
+// An empty map is the worst outcome: it looks broken and says nothing. If a
+// region the user set is what emptied it, say so and offer the way out — this
+// is the safety net for every place name the database can't resolve properly.
+function updateRegionWarning() {
+    const el = document.getElementById("mkp-region-warn");
+    if (!el) return;
+
+    const shouldWarn = !!homeContext && markers.length === 0 && droppedByRegion > 0;
+    el.style.display = shouldWarn ? "flex" : "none";
+    if (!shouldWarn) return;
+
+    // Nothing will ever be placed in this state, so stop pretending to load
+    document.getElementById("map-loading")?.remove();
+
+    const where = homeContext.label || homeContext.admin1 || homeContext.country;
+    el.innerHTML =
+        `<span>${droppedByRegion} listing${droppedByRegion === 1 ? "" : "s"} hidden — ` +
+        `they aren't in <b>${where}</b>.</span>` +
+        `<button type="button" id="mkp-region-reset">Use auto</button>`;
+
+    el.querySelector("#mkp-region-reset").onclick = () => {
+        saveHomeContext(null);
+        droppedByRegion = 0;
+        resetGeocoding();
+        el.style.display = "none";
+
+        const btn = document.getElementById("mkp-tool-home");
+        setBtnActive(btn, false);
+        const status = document.getElementById("mkp-home-status");
+        if (status) status.textContent = "Auto-detected from listings";
+    };
+}
+
 function setAutoloadSpinner(running, progress = 0) {
     const el = document.getElementById("mkp-autoload-spinner");
     if (el) el.style.display = running ? "flex" : "none";
@@ -1477,6 +1647,8 @@ function isStrongContext(ctx) {
 // -----------------------------
 // Merge and geocode listings (ONCE)
 // -----------------------------
+let droppedByRegion = 0;
+
 function mergeListings(newListings, incomingContext) {
     for (const l of newListings) {
         // Skip duplicates
@@ -1514,6 +1686,7 @@ function mergeListings(newListings, incomingContext) {
         // the cities that have no European namesake and kept the ones that do.
         const authoritative = contextToUse && !contextToUse.inferred;
         if (authoritative && contextToUse.country && place.country !== contextToUse.country) {
+            droppedByRegion++;
             continue;
         }
 
@@ -1652,6 +1825,7 @@ window.addEventListener("message", (event) => {
 
     updateNewBadge();
     updateAreaHint();
+    updateRegionWarning();
 });
 
 // Show how many new listings this visit turned up, so the feature is visible
