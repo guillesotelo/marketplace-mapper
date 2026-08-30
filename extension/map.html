@@ -235,6 +235,28 @@
         }
 
         /* -----------------------------
+           Basemap attribution
+
+           Required to stay visible: OSM's licence and CARTO's basemap terms
+           ("prominent and conspicuous", in the corner of the map). Our
+           leaflet.css kills the control outright, so restore it here — floated
+           over the tiles rather than in the footer, so it costs no panel height.
+        ----------------------------- */
+        .leaflet-container .leaflet-control-attribution {
+            display: block !important;
+            background: rgba(255, 255, 255, .72);
+            color: #4a5568;
+            font-size: 9px;
+            line-height: 1.35;
+            padding: 0 4px;
+            border-radius: 3px 0 0 0;
+        }
+
+        .leaflet-container .leaflet-control-attribution a {
+            color: #3b6fd4;
+        }
+
+        /* -----------------------------
            Scraper health banner
         ----------------------------- */
         #mkp-health {
@@ -638,7 +660,7 @@
         <span class="mkp-tool-sep"></span>
 
         <button class="mkp-tool-btn tt-up" id="mkp-tool-color"
-            data-tooltip="Color pins by freshness — green: free, orange: just listed, gold: saved">
+            data-tooltip="Color pins by freshness: green is free, orange just listed, gold saved">
             <svg viewBox="0 0 24 24">
                 <path
                     d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
@@ -646,7 +668,7 @@
         </button>
 
         <button class="mkp-tool-btn tt-up" id="mkp-tool-home"
-            data-tooltip="Set your region — fixes listings placed in the wrong country">
+            data-tooltip="Set your region if listings are placed in the wrong country">
             <svg viewBox="0 0 24 24">
                 <path
                     d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" />
@@ -681,6 +703,7 @@
         </p>
     </div>
 
+    <script src="basemap-key.js"></script>
     <script src="leaflet/leaflet.js"></script>
     <script src="pako.min.js"></script>
     <script src="map.js"></script>

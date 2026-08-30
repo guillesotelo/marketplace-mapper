@@ -1,0 +1,12 @@
+# CARTO basemap key — never commit. See scripts/set-basemap-key.js
+carto-key.txt
+extension/basemap-key.js
+edge-extension/basemap-key.js
+
+# build output
+extension.zip
+edge-extension.zip
+dist/
+
+node_modules/
+.DS_Store

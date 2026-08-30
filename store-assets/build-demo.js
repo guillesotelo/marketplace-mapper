@@ -185,7 +185,10 @@ const demoScript = `
             zoomAnimation: false, markerZoomAnimation: false
         }).setView(CENTER, 13);
 
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        // Keyed so re-renders don't bake in the "API KEY REQUIRED" watermark.
+        window.CARTO_KEY = window.CARTO_KEY || window.MKPM_BASEMAP_KEY || "";
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" +
+            (window.CARTO_KEY ? "?key=" + window.CARTO_KEY : ""), {
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 

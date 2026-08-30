@@ -382,9 +382,25 @@ function injectMap() {
     });
 
     document.body.appendChild(iframe);
-    setTimeout(() => {
-      iframe.style.opacity = 1
-    }, 4000)
+
+    // Reveal when the map reports it has placed its first listing, rather than
+    // after a fixed wait. The timeout stays as a backstop: a search with no
+    // results never places a marker, and the panel still has to appear so its
+    // banners and controls are reachable.
+    const revealMap = () => {
+      if (iframe.style.opacity === "1") return;
+      iframe.style.opacity = 1;
+    };
+
+    window.addEventListener("message", (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      if (event.data?.type === "map-ready") revealMap();
+
+      // The frame is up and listening: send it what we can see right now
+      if (event.data?.type === "map-listening") scrapeTick();
+    });
+
+    setTimeout(revealMap, 4000);
   }
 
   function normalize(text) {
@@ -803,7 +819,7 @@ function injectMap() {
   // injectMap() runs again on every route change, so drop the previous timer
   // instead of stacking a new scraper on top of it.
   if (window.__mkpScrapeTimer) clearInterval(window.__mkpScrapeTimer);
-  window.__mkpScrapeTimer = setInterval(() => {
+  const scrapeTick = () => {
 
     // scrape all listings
     let listings = getListings();
@@ -839,7 +855,12 @@ function injectMap() {
         itemScraped
       }, "*");
     }
-  }, 2000);
+  };
+
+  // Run once now as well as on the interval: setInterval doesn't fire at t=0,
+  // so the first batch of listings used to be two seconds away for no reason.
+  scrapeTick();
+  window.__mkpScrapeTimer = setInterval(scrapeTick, 2000);
 }
 
 // Run at first load

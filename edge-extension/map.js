@@ -1,4 +1,31 @@
+// -----------------------------
+// Basemap
+//
+// CARTO began requiring an API key for raster tiles in August 2026; unkeyed
+// requests still render but come back stamped "API KEY REQUIRED". A key is free
+// (5 million tiles/month, non-commercial) from https://carto.com/basemaps/apikey/
+//
+// Paste the key below. If CARTO's mail gives a full tile URL, put that in `url`
+// instead and leave `key` empty — the parameter name has changed before, so the
+// URL they send you is the authoritative version.
+// -----------------------------
+const BASEMAP = {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    // Set by basemap-key.js, which scripts/set-basemap-key.js generates and git
+    // ignores. Absent (a fresh clone) just means watermarked tiles.
+    key: typeof MKPM_BASEMAP_KEY === "string" ? MKPM_BASEMAP_KEY : "",
+    keyParam: "key",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+};
+
+function basemapUrl() {
+    if (!BASEMAP.key) return BASEMAP.url;
+    const sep = BASEMAP.url.includes("?") ? "&" : "?";
+    return `${BASEMAP.url}${sep}${BASEMAP.keyParam}=${encodeURIComponent(BASEMAP.key)}`;
+}
+
 let map;
+let pendingListings = null;   // arrived before the city database was ready
 let markerLayerGroup = null;
 let markers = [];
 let markerByItemKey = new Map(); // itemKey -> marker
@@ -770,7 +797,7 @@ function updateAreaHint() {
         hint.style.display = "block";
     } else if (areaPolygon) {
         const shown = markers.filter(m => markerLayerGroup.hasLayer(m)).length;
-        hint.textContent = `${shown} listing${shown === 1 ? "" : "s"} in your area — click the area tool to clear`;
+        hint.textContent = `${shown} listing${shown === 1 ? "" : "s"} in your area. Click the area tool to clear`;
         hint.style.display = "block";
     } else {
         hint.style.display = "none";
@@ -1029,10 +1056,10 @@ function setScrapeHealth(status) {
     }
 
     const msg = status === "unparsed"
-        ? "Listings are visible but can't be read — Facebook may have changed their layout."
+        ? "Listings are visible but can't be read. Facebook may have changed their layout."
         : "No listings found on this page. If you can see listings, the extension may need an update.";
 
-    const subject = encodeURIComponent(`Marketplace Map — scraping issue (${status})`);
+    const subject = encodeURIComponent(`Marketplace Map: scraping issue (${status})`);
     el.innerHTML = `<span>${msg}</span>
         <a href="mailto:guille.sotelo.cloud@gmail.com?subject=${subject}" target="_blank">Report</a>`;
     el.style.display = "flex";
@@ -1054,7 +1081,7 @@ function updateRegionWarning() {
 
     const where = homeContext.label || homeContext.admin1 || homeContext.country;
     el.innerHTML =
-        `<span>${droppedByRegion} listing${droppedByRegion === 1 ? "" : "s"} hidden — ` +
+        `<span>${droppedByRegion} listing${droppedByRegion === 1 ? "" : "s"} hidden, ` +
         `they aren't in <b>${where}</b>.</span>` +
         `<button type="button" id="mkp-region-reset">Use auto</button>`;
 
@@ -1069,6 +1096,16 @@ function updateRegionWarning() {
         const status = document.getElementById("mkp-home-status");
         if (status) status.textContent = "Auto-detected from listings";
     };
+}
+
+// Tell content.js the panel is worth showing. It reveals on this instead of a
+// fixed delay, so a fast page no longer waits the full backstop.
+let announcedReady = false;
+
+function announceMapReady() {
+    if (announcedReady) return;
+    announcedReady = true;
+    parent.postMessage({ type: "map-ready" }, "*");
 }
 
 function setAutoloadSpinner(running, progress = 0) {
@@ -1361,14 +1398,25 @@ async function initMap() {
         console.error("MKP Mapper: failed to load city DB", e);
     }
 
-    map = L.map("mkp-mapper-map");
+    // prefix: false drops Leaflet's own "Leaflet" credit, leaving just the two
+    // credits we are actually required to show
+    map = L.map("mkp-mapper-map", { attributionControl: false });
+    L.control.attribution({ prefix: false, position: "bottomright" }).addTo(map);
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    L.tileLayer(basemapUrl(), {
+        subdomains: "abcd",     // CARTO serves a-d; Leaflet defaults to a-c
+        maxZoom: 20,
+        attribution: BASEMAP.attribution
     }).addTo(map);
 
     markerLayerGroup = L.layerGroup().addTo(map);
+
+    // Replay anything that arrived while the database was loading
+    if (pendingListings) {
+        const held = pendingListings;
+        pendingListings = null;
+        setTimeout(() => window.postMessage(held, "*"), 0);
+    }
 
     // Default world view — removed as soon as first marker lands
     map.setView([20, 0], 2);
@@ -1724,6 +1772,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     setupTools();
+
+    // Tell content.js we are listening. Its first scrape runs before this frame
+    // exists, so that batch lands nowhere; without this we would sit idle until
+    // the next two-second tick.
+    parent.postMessage({ type: "map-listening" }, "*");
 });
 
 // History is only worth writing once things settle, not on every scrape tick
@@ -1749,6 +1802,15 @@ window.addEventListener("message", (event) => {
         return;
     }
 
+    // The city database is ~12MB, so the first batch of listings can easily
+    // arrive before it is ready. Geocoding them now would silently drop every
+    // one and leave the panel hidden until the next scrape two seconds later,
+    // so hold the batch and replay it once the database lands.
+    if (!cityIndex || !map) {
+        pendingListings = event.data;
+        return;
+    }
+
     const itemView = isItemView(event.data);
 
     // Item view: add item marker if missing, open popup once, then ignore subsequent messages
@@ -1765,6 +1827,7 @@ window.addEventListener("message", (event) => {
                     initialLocationSet = true;
                     map.setView([l.jLat, l.jLon], 11);
                     document.getElementById("map-loading")?.remove();
+                    announceMapReady();
                 }
             }
         }
@@ -1819,6 +1882,7 @@ window.addEventListener("message", (event) => {
                 initialLocationSet = true;
                 map.setView([viewLat, viewLon], 11);
                 document.getElementById("map-loading")?.remove();
+                announceMapReady();
             }
         }
     }
@@ -1838,6 +1902,6 @@ function updateNewBadge() {
     btn.dataset.count = count > 99 ? "99+" : String(count);
     btn.classList.toggle("has-new", count > 0);
     btn.dataset.tooltip = count > 0
-        ? `${count} new since your last visit — click to show only these`
+        ? `${count} new since your last visit. Click to show only these`
         : "Show only listings new since your last visit";
 }

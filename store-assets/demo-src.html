@@ -387,6 +387,20 @@
         .leaflet-popup-content a {
             color: #0d6efd;
         }
+
+        /* Attribution: required on any published map using CARTO/OSM tiles.
+           extension/leaflet/leaflet.css hides the control, so restore it here
+           too — otherwise the promo images publish uncredited map imagery. */
+        .leaflet-container .leaflet-control-attribution {
+            display: block !important;
+            background: rgba(255, 255, 255, .72);
+            color: #4a5568;
+            font-size: 9px;
+            line-height: 1.35;
+            padding: 0 4px;
+        }
+
+        .leaflet-container .leaflet-control-attribution a { color: #3b6fd4; }
     </style>
 
     <style>
@@ -579,6 +593,7 @@
         </div>
     </div>
 
+    <script src="../extension/basemap-key.js"></script>
     <script src="../extension/leaflet/leaflet.js"></script>
     <script>
         // ---------------------------------------------------------------
@@ -647,7 +662,10 @@
             zoomAnimation: false, markerZoomAnimation: false
         }).setView(CENTER, 13);
 
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        // Keyed so re-renders don't bake in the "API KEY REQUIRED" watermark.
+        window.CARTO_KEY = window.CARTO_KEY || window.MKPM_BASEMAP_KEY || "";
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" +
+            (window.CARTO_KEY ? "?key=" + window.CARTO_KEY : ""), {
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 
